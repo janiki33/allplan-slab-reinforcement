@@ -55,11 +55,27 @@ from TypeCollections.ModelEleList import ModelEleList
 from Utils.HandleCreator import HandleCreator
 from Utils.RotationUtil import RotationUtil
 
-from SlabReinforcement.contour_placement import (compute_contour_bars, group_bars_into_runs,
-                                                 loop_area, split_closed_loops)
-from SlabReinforcement.opening_clipping import (compute_edge_bar_runs,
-                                                compute_edge_strip_segments,
-                                                compute_placement_bands)
+# Nachbarmodule im selben Ordner: relativer Import wie im offiziellen
+# Beispiel (ArchitectureExamples/Objects/DoorOpening.py: "from .OpeningBase
+# import OpeningBase"). Ein absoluter Import "from SlabReinforcement.x"
+# scheitert, sobald Allplan dieses Skript selbst als Modul
+# "SlabReinforcement" lädt (Namenskollision Modul <-> Ordner).
+# Der Fallback greift, falls das Skript ohne Paketkontext geladen wird.
+try:
+    from .contour_placement import (compute_contour_bars, group_bars_into_runs,
+                                    loop_area, split_closed_loops)
+    from .opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
+                                   compute_placement_bands)
+except ImportError:
+    import os
+    import sys
+
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+    from contour_placement import (compute_contour_bars, group_bars_into_runs,
+                                   loop_area, split_closed_loops)
+    from opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
+                                  compute_placement_bands)
 
 if TYPE_CHECKING:
     from __BuildingElementStubFiles.SlabReinforcementBuildingElement import \
@@ -67,7 +83,11 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-print('Load SlabReinforcement.py')
+SCRIPT_VERSION = '0.3.1'
+
+# Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
+# ist, welche Skriptversion Allplan tatsächlich geladen hat
+print(f'Load SlabReinforcement.py (Version {SCRIPT_VERSION})')
 
 # Optionen der Seiten-Combos (müssen den ValueList-Einträgen der .pyp entsprechen)
 SIDE_STIRRUP = 'Randbügel'
@@ -91,6 +111,8 @@ def check_allplan_version(_build_ele: BuildingElement,
 def create_script_object(build_ele: BuildingElement,
                          script_object_data: BaseScriptObjectData) -> BaseScriptObject:
     """Erzeugt das ScriptObject."""
+
+    print(f'SlabReinforcement {SCRIPT_VERSION}: create_script_object')
 
     return SlabReinforcementScript(build_ele, script_object_data)
 
@@ -145,6 +167,8 @@ class SlabReinforcementScript(BaseScriptObject):
 
         input_method = build_ele.InputMethod.value
 
+        print(f'SlabReinforcement: start_input, Modus "{input_method}"')
+
         if input_method == INPUT_ELEMENT:
             self.script_object_interactor = SingleElementSelectInteractor(
                 self.sel_result,
@@ -186,6 +210,10 @@ class SlabReinforcementScript(BaseScriptObject):
         build_ele.InputMode.value = build_ele.INPUT_MODE_CREATION
 
         self.script_object_interactor = None
+
+        print(f'SlabReinforcement: Eingabe abgeschlossen — '
+              f'Kontur: {"ja" if self.contour else "nein (Rechteck)"}, '
+              f'Öffnungen: {len(self.openings)}')
 
 
     def execute(self) -> CreateElementResult:
