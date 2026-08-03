@@ -9,7 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScripts' / 'SlabReinforcement'))
 
-from opening_clipping import compute_edge_bar_runs, compute_placement_bands
+from opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
+                              compute_placement_bands)
 
 
 class ComputePlacementBandsTest(unittest.TestCase):
@@ -71,6 +72,51 @@ class ComputePlacementBandsTest(unittest.TestCase):
     def test_degenerate_slab_returns_nothing(self):
         self.assertEqual(compute_placement_bands(0, 5000, None, None), [])
         self.assertEqual(compute_placement_bands(4000, -5, None, None), [])
+
+
+class BonusLengthTest(unittest.TestCase):
+
+    def test_connection_bar_overhang_saves_short_boundary_segment(self):
+        # Reststück am Rand run=0 nur 200 lang, Mindestlänge 300 — mit
+        # Anschlusseisen-Überstand 600 bleibt es erhalten
+        bands = compute_placement_bands(4000, 5000, (1000, 2000), (200, 4900),
+                                        min_segment_length=300, bonus_start=600)
+
+        self.assertEqual(bands[1].run_segments, [(0, 200)])
+
+    def test_bonus_does_not_apply_to_opening_side_segment(self):
+        # Segment endet an der Öffnung, nicht am Rand -> kein Bonus, entfällt
+        bands = compute_placement_bands(4000, 5000, (1000, 2000), (200, 4900),
+                                        min_segment_length=300, bonus_end=600)
+
+        middle = bands[1]
+        self.assertEqual(middle.run_segments, [(4900, 5000)])
+
+
+class ComputeEdgeStripSegmentsTest(unittest.TestCase):
+
+    def test_full_edge_without_opening(self):
+        segments = compute_edge_strip_segments(4000, None, None, (0, 600))
+
+        self.assertEqual(segments, [(0, 4000)])
+
+    def test_opening_outside_strip_keeps_full_edge(self):
+        # Öffnung liegt mitten in der Platte, weit weg vom Randstreifen [0, 600]
+        segments = compute_edge_strip_segments(4000, (1200, 2200), (1500, 2300), (0, 600))
+
+        self.assertEqual(segments, [(0, 4000)])
+
+    def test_opening_in_strip_splits_edge(self):
+        # Öffnung reicht bis an den Rand (run 0..400) -> Kante wird geteilt
+        segments = compute_edge_strip_segments(4000, (1200, 2200), (0, 400), (0, 600))
+
+        self.assertEqual(segments, [(0, 1200), (2200, 4000)])
+
+    def test_short_rest_piece_is_dropped(self):
+        segments = compute_edge_strip_segments(4000, (50, 2200), (0, 400), (0, 600),
+                                               min_segment_length=100)
+
+        self.assertEqual(segments, [(2200, 4000)])
 
 
 class ComputeEdgeBarRunsTest(unittest.TestCase):

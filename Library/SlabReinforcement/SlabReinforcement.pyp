@@ -92,7 +92,7 @@
       </Parameter>
       <Parameter>
         <Name>BottomXExpander</Name>
-        <Text>Untere Lage X-Richtung (außen)</Text>
+        <Text>Untere Lage X-Richtung</Text>
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
@@ -126,7 +126,7 @@
       </Parameter>
       <Parameter>
         <Name>BottomYExpander</Name>
-        <Text>Untere Lage Y-Richtung (innen)</Text>
+        <Text>Untere Lage Y-Richtung</Text>
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
@@ -166,7 +166,7 @@
     <Parameters>
       <Parameter>
         <Name>TopXExpander</Name>
-        <Text>Obere Lage X-Richtung (außen)</Text>
+        <Text>Obere Lage X-Richtung</Text>
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
@@ -200,7 +200,7 @@
       </Parameter>
       <Parameter>
         <Name>TopYExpander</Name>
-        <Text>Obere Lage Y-Richtung (innen)</Text>
+        <Text>Obere Lage Y-Richtung</Text>
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>

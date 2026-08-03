@@ -46,8 +46,7 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
 
 - **Geometrie:** Länge/Breite/Dicke der (vorerst rechteckigen) Platte,
   dazu Handles am Plattenursprung für Länge/Breite/Dicke. Unter „Verlegung"
-  ist wählbar, ob die X- oder die Y-Lagen außen liegen (die Expander-Titel
-  „außen/innen" beziehen sich auf die Voreinstellung X außen).
+  ist wählbar, ob die X- oder die Y-Lagen außen liegen.
 - **Bewehrung unten / oben:** je Richtung Durchmesser, Stababstand,
   Betondeckung und Stahlgüte. Mit „Alle Lagen gleicher Durchmesser" gilt
   eine gemeinsame ø/a-Eingabe für alle vier Lagen.
@@ -59,6 +58,13 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
   über den Rand über), „Separate Anschlusseisen" (eigene Stäbe der Länge
   2 × Stoßlänge, mittig auf der Kante) oder „Keine". Die Stoßlänge ist als
   Stoßfaktor (Vielfaches von ø) konfigurierbar — bewusst kein Normwert.
+  Randbügel und separate Anschlusseisen sparen den Bereich einer Öffnung
+  aus, wenn diese den jeweiligen Randstreifen schneidet. Bekannte
+  Einschränkungen: Bei aktiver Öffnung starten die Hauptlagen-Bänder ihr
+  Raster je Band neu, sodass Randbügel/Anschlusseisen dort nicht zwingend
+  mit den Lagenstäben fluchten; die Format-Eigenschaften (Stift/Farbe)
+  wirken auf den Plattenkörper, die Bewehrung übernimmt die globalen
+  Eigenschaften (bzw. den je Lage gewählten Layer).
 - **Öffnung:** eine rechteckige Öffnung über Lage und Abmessung; Zulagen
   (Anzahl, Ø, Abstand) und Übergreifungslänge sind frei konfigurierbar.
 - **Allgemein:** Betongüte, seitliche Deckung, Mindeststablänge (kürzere

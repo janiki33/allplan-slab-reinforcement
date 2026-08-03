@@ -38,7 +38,9 @@ def compute_placement_bands(dist_len: float,
                             opening_dist: tuple[float, float] | None,
                             opening_run: tuple[float, float] | None,
                             min_band_width: float = 1.0,
-                            min_segment_length: float = 1.0) -> list[PlacementBand]:
+                            min_segment_length: float = 1.0,
+                            bonus_start: float = 0.0,
+                            bonus_end: float = 0.0) -> list[PlacementBand]:
     """Zerlegt die Verlegefläche einer Lage in Bänder, in denen jeweils Stäbe
     gleicher Länge verlegt werden können.
 
@@ -54,6 +56,10 @@ def compute_placement_bands(dist_len: float,
         opening_run:        (min, max) der Öffnung auf der Stabrichtung oder None
         min_band_width:     Bänder schmaler als dieser Wert werden verworfen
         min_segment_length: Stab-Segmente kürzer als dieser Wert werden verworfen
+        bonus_start:        Zusatzlänge (z. B. Anschlusseisen-Überstand), die
+                            einem am Rand run=0 endenden Segment beim
+                            Mindestlängen-Test angerechnet wird
+        bonus_end:          dito für den Rand run=run_len
 
     Returns:
         Liste der Verlegebänder in aufsteigender dist-Reihenfolge
@@ -84,7 +90,10 @@ def compute_placement_bands(dist_len: float,
 
     clipped_segments = [(seg_from, seg_to)
                         for seg_from, seg_to in ((0.0, r0), (r1, run_len))
-                        if seg_to - seg_from >= min_segment_length]
+                        if (seg_to - seg_from)
+                        + (bonus_start if seg_from == 0.0 else 0.0)
+                        + (bonus_end if seg_to == run_len else 0.0)
+                        >= min_segment_length]
     if clipped_segments:
         bands.append(PlacementBand(d0, d1, clipped_segments))
 
@@ -92,6 +101,45 @@ def compute_placement_bands(dist_len: float,
         bands.append(PlacementBand(d1, dist_len, [(0.0, run_len)]))
 
     return bands
+
+
+def compute_edge_strip_segments(dist_len: float,
+                                opening_dist: tuple[float, float] | None,
+                                opening_run: tuple[float, float] | None,
+                                strip_run: tuple[float, float],
+                                min_segment_length: float = 1.0) -> list[tuple[float, float]]:
+    """Teilt die Verlegestrecke entlang einer Plattenkante (dist-Achse) in
+    Abschnitte, die die Öffnung aussparen.
+
+    Gedacht für Randbügel und separate Anschlusseisen: Deren Stäbe belegen
+    senkrecht zur Kante den Randstreifen strip_run (Intervall auf der
+    Stabrichtungs-Achse der Kante). Nur wenn die Öffnung diesen Streifen
+    schneidet, wird die Verlegestrecke im Öffnungsbereich unterbrochen.
+
+    Returns:
+        Liste (dist_from, dist_to) der zu verlegenden Abschnitte
+    """
+
+    full = [(0.0, dist_len)]
+
+    if dist_len <= 0:
+        return []
+
+    if opening_dist is None or opening_run is None:
+        return full
+
+    if not _overlap(opening_run[0], opening_run[1], strip_run[0], strip_run[1]):
+        return full
+
+    d0 = max(opening_dist[0], 0.0)
+    d1 = min(opening_dist[1], dist_len)
+
+    if d0 >= d1:
+        return full
+
+    return [(seg_from, seg_to)
+            for seg_from, seg_to in ((0.0, d0), (d1, dist_len))
+            if seg_to - seg_from >= min_segment_length]
 
 
 class EdgeBarRun(NamedTuple):

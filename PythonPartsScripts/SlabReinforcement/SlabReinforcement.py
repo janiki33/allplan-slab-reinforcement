@@ -42,7 +42,9 @@ from TypeCollections.ModelEleList import ModelEleList
 from Utils.HandleCreator import HandleCreator
 from Utils.RotationUtil import RotationUtil
 
-from SlabReinforcement.opening_clipping import compute_placement_bands, compute_edge_bar_runs
+from SlabReinforcement.opening_clipping import (compute_edge_bar_runs,
+                                                compute_edge_strip_segments,
+                                                compute_placement_bands)
 
 # Optionen der Seiten-Combos (müssen den ValueList-Einträgen der .pyp entsprechen)
 SIDE_STIRRUP = 'Randbügel'
@@ -389,12 +391,18 @@ class SlabReinforcement():
             opening_run = opening_dist = None
 
         # Reststäbe unterhalb der konfigurierten Mindestlänge (mindestens aber
-        # beidseitige Deckung + 10 mm Reststab) entfallen ersatzlos
+        # beidseitige Deckung + 10 mm Reststab) entfallen ersatzlos; ein
+        # Anschlusseisen-Überstand zählt dabei zur Segmentlänge dazu, damit
+        # der Bewehrungsanschluss an der Kante nicht stillschweigend entfällt
         min_segment_length = max(self.build_ele.MinBarLength.value,
                                  2 * self.side_cover + 10)
 
+        lap = self.overlap_factor * layer.diameter
+
         bands = compute_placement_bands(dist_len, run_len, opening_dist, opening_run,
-                                        min_segment_length=min_segment_length)
+                                        min_segment_length=min_segment_length,
+                                        bonus_start=lap if side_start == SIDE_CONNECT else 0.0,
+                                        bonus_end=lap if side_end == SIDE_CONNECT else 0.0)
 
         placements: list[AllplanReinf.BarPlacement] = []
 
@@ -569,8 +577,15 @@ class SlabReinforcement():
 
         for direction, side_start, side_end in (('X', self.side_left, self.side_right),
                                                 ('Y', self.side_bottom, self.side_top)):
-            run_len, dist_len = (self.length, self.width) if direction == 'X' \
-                else (self.width, self.length)
+            if direction == 'X':
+                run_len, dist_len = self.length, self.width
+                opening_run, opening_dist = self.opening_x, self.opening_y
+            else:
+                run_len, dist_len = self.width, self.length
+                opening_run, opening_dist = self.opening_y, self.opening_x
+
+            if not self.has_opening:
+                opening_run = opening_dist = None
 
             for layer in [layer for layer in self.layers if layer.direction == direction]:
                 lap = self.overlap_factor * layer.diameter
@@ -580,28 +595,34 @@ class SlabReinforcement():
                         continue
 
                     # Stab steht je zur Hälfte in und außerhalb der Platte
-                    shape = self._create_straight_bar_shape(layer, 2 * lap, 0, 0)
-
                     run_pos = -lap if at_start else run_len - lap
 
-                    if direction == 'X':
-                        from_pnt = AllplanGeo.Point3D(run_pos, 0, 0)
-                        to_pnt = AllplanGeo.Point3D(run_pos, dist_len, 0)
-                    else:
-                        from_pnt = AllplanGeo.Point3D(0, run_pos, 0)
-                        to_pnt = AllplanGeo.Point3D(dist_len, run_pos, 0)
+                    # Verlegestrecke unterbrechen, wo die Öffnung den innen
+                    # liegenden Teil des Stabstreifens schneidet
+                    strip_run = (0.0, lap) if at_start else (run_len - lap, run_len)
 
-                    placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
-                        self._next_position(),
-                        shape,
-                        from_pnt,
-                        to_pnt,
-                        self.side_cover,
-                        self.side_cover,
-                        layer.spacing)
+                    for dist_from, dist_to in compute_edge_strip_segments(
+                            dist_len, opening_dist, opening_run, strip_run):
+                        shape = self._create_straight_bar_shape(layer, 2 * lap, 0, 0)
 
-                    self._set_placement_layer(placement, layer.allplan_layer)
-                    placements.append(placement)
+                        if direction == 'X':
+                            from_pnt = AllplanGeo.Point3D(run_pos, dist_from, 0)
+                            to_pnt = AllplanGeo.Point3D(run_pos, dist_to, 0)
+                        else:
+                            from_pnt = AllplanGeo.Point3D(dist_from, run_pos, 0)
+                            to_pnt = AllplanGeo.Point3D(dist_to, run_pos, 0)
+
+                        placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                            self._next_position(),
+                            shape,
+                            from_pnt,
+                            to_pnt,
+                            self.side_cover if dist_from == 0 else 0,
+                            self.side_cover if dist_to == dist_len else 0,
+                            layer.spacing)
+
+                        self._set_placement_layer(placement, layer.allplan_layer)
+                        placements.append(placement)
 
         return placements
 
@@ -657,20 +678,26 @@ class SlabReinforcement():
             stirrup_layer_id = self.build_ele.LayerStirrupX.value if direction == 'X' \
                 else self.build_ele.LayerStirrupY.value
 
+            if direction == 'X':
+                run_len, dist_len = self.length, self.width
+                opening_run, opening_dist = self.opening_x, self.opening_y
+            else:
+                run_len, dist_len = self.width, self.length
+                opening_run, opening_dist = self.opening_y, self.opening_x
+
+            if not self.has_opening:
+                opening_run = opening_dist = None
+
             for side_option, at_start in edge_options:
                 if side_option != SIDE_STIRRUP:
                     continue
 
                 if direction == 'X':
                     angles = RotationAngles(0, -90, -90) if at_start else RotationAngles(0, -90, 90)
-                    x_pos = self.side_cover if at_start else self.length - self.side_cover
-                    from_pnt = AllplanGeo.Point3D(x_pos, 0, z_pos)
-                    to_pnt = AllplanGeo.Point3D(x_pos, self.width, z_pos)
+                    edge_pos = self.side_cover if at_start else self.length - self.side_cover
                 else:
                     angles = RotationAngles(0, -90, 0) if at_start else RotationAngles(0, -90, 180)
-                    y_pos = self.side_cover if at_start else self.width - self.side_cover
-                    from_pnt = AllplanGeo.Point3D(0, y_pos, z_pos)
-                    to_pnt = AllplanGeo.Point3D(self.length, y_pos, z_pos)
+                    edge_pos = self.side_cover if at_start else self.width - self.side_cover
 
                 shape = GeneralShapeBuilder.create_open_stirrup(
                     web_height, leg_length, angles, shape_props, no_cover,
@@ -680,16 +707,30 @@ class SlabReinforcement():
                     print(f'SlabReinforcement: Randbügel-Shape {direction} ungültig — übersprungen')
                     continue
 
-                placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
-                    self._next_position(),
-                    shape,
-                    from_pnt,
-                    to_pnt,
-                    self.side_cover,
-                    self.side_cover,
-                    bottom_layer.spacing)
+                # Verlegestrecke unterbrechen, wo die Öffnung den Randstreifen
+                # (Bügelschenkel-Tiefe ab Kante) schneidet
+                strip_depth = self.side_cover + leg_length
+                strip_run = (0.0, strip_depth) if at_start else (run_len - strip_depth, run_len)
 
-                self._set_placement_layer(placement, stirrup_layer_id)
-                placements.append(placement)
+                for dist_from, dist_to in compute_edge_strip_segments(
+                        dist_len, opening_dist, opening_run, strip_run):
+                    if direction == 'X':
+                        from_pnt = AllplanGeo.Point3D(edge_pos, dist_from, z_pos)
+                        to_pnt = AllplanGeo.Point3D(edge_pos, dist_to, z_pos)
+                    else:
+                        from_pnt = AllplanGeo.Point3D(dist_from, edge_pos, z_pos)
+                        to_pnt = AllplanGeo.Point3D(dist_to, edge_pos, z_pos)
+
+                    placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                        self._next_position(),
+                        AllplanReinf.BendingShape(shape),
+                        from_pnt,
+                        to_pnt,
+                        self.side_cover if dist_from == 0 else 0,
+                        self.side_cover if dist_to == dist_len else 0,
+                        bottom_layer.spacing)
+
+                    self._set_placement_layer(placement, stirrup_layer_id)
+                    placements.append(placement)
 
         return placements
