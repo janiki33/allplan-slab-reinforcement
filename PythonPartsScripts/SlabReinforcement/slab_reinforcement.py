@@ -54,6 +54,7 @@ from StdReinfShapeBuilder.RotationAngles import RotationAngles
 from TypeCollections.HandleList import HandleList
 from TypeCollections.ModelEleList import ModelEleList
 from Utils.HandleCreator import HandleCreator
+from Utils.RotationUtil import RotationUtil
 
 def _load_helper_modules():
     """Lädt die drei Nachbarmodule aus demselben Ordner.
@@ -142,7 +143,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.4.2'
+SCRIPT_VERSION = '0.4.3'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -824,9 +825,7 @@ class SlabReinforcement():
                                    layer: LayerConfig,
                                    length: float,
                                    cover_start: float,
-                                   cover_end: float,
-                                   start_hook: float = -1.0,
-                                   end_hook: float = -1.0) -> AllplanReinf.BendingShape:
+                                   cover_end: float) -> AllplanReinf.BendingShape:
         """Gerader Stab in Lagenrichtung.
 
         Deckungsmodell wie im Deckenplatte-PythonPart des Anwenders: Die
@@ -844,14 +843,13 @@ class SlabReinforcement():
         cover_props = ConcreteCoverProperties(cover_start, cover_end, 0.0, 0.0)
 
         # start_hook/end_hook = -1: keine Haken (der Default 0 würde Haken
-        # mit automatisch berechneter Länge erzeugen). Ein positiver Wert
-        # biegt den Randbügel direkt an den Stab an.
+        # mit automatisch berechneter Länge erzeugen)
         return GeneralShapeBuilder.create_longitudinal_shape_with_hooks(length,
                                                                         model_angles,
                                                                         self._shape_props(layer),
                                                                         cover_props,
-                                                                        start_hook=start_hook,
-                                                                        end_hook=end_hook)
+                                                                        start_hook=-1,
+                                                                        end_hook=-1)
 
 
     # ==================== Rechteckmodus ====================
@@ -1325,19 +1323,25 @@ class SlabReinforcement():
         return max(int(outer / 10.0) * 10.0 - layer.diameter, 0.0)
 
 
-    def _hook_coordinates(self, layer: LayerConfig) -> list[float]:
-        """Koordinaten der Kanten, an denen die Stäbe dieser Lage angebogen
-        werden.
+    def _hook_edges(self, layer: LayerConfig) -> list[tuple[float, float, float]]:
+        """Kanten, an denen die Stäbe dieser Lage angebogen werden.
 
         Angebogen wird nur an den unteren Lagen (1. und 2. Lage) und nur an
         Kanten, auf die die Stäbe senkrecht zulaufen.
+
+        Returns:
+            Liste (Koordinate auf der Stabachse, Ausdehnung der Kante von,
+            Ausdehnung der Kante bis) — die Ausdehnung begrenzt den Bügel
+            auf den tatsächlichen Randbereich.
         """
 
         if self.stirrup_style == 'Einzeln' or layer.is_top or not self.contour:
             return []
 
         run_axis = 0 if layer.direction == 'X' else 1
-        coordinates = []
+        dist_axis = 1 - run_axis
+
+        edges = []
 
         for _, option, _, start, end, axis_parallel in self._contour_edges():
             if option != SIDE_STIRRUP or not axis_parallel:
@@ -1347,30 +1351,78 @@ class SlabReinforcement():
             if abs(end[run_axis] - start[run_axis]) > 1.0:
                 continue
 
-            coordinates.append(start[run_axis])
+            edges.append((start[run_axis],
+                          min(start[dist_axis], end[dist_axis]),
+                          max(start[dist_axis], end[dist_axis])))
 
-        return coordinates
+        return edges
 
 
     def _piece_hooks(self,
                      layer: LayerConfig,
-                     piece: tuple[float, float]) -> tuple[float, float]:
-        """Hakenlängen für die beiden Enden eines Teilstabes."""
+                     piece: tuple[float, float],
+                     positions: list[float]) -> tuple[float, float]:
+        """Bügelschenkel für die beiden Enden eines Teilstabes.
 
-        coordinates = self._hook_coordinates(layer)
+        Ein Ende bekommt nur dann einen Bügel, wenn es tatsächlich auf einer
+        Randkante liegt — also sowohl in Stabrichtung als auch quer dazu im
+        Bereich dieser Kante. Damit entstehen die Bügel nur am Rand und
+        nicht bei zufällig gleicher Koordinate mitten in der Platte.
+        """
 
-        if not coordinates:
-            return (-1.0, -1.0)
-
+        edges = self._hook_edges(layer)
         hook = self._hook_length(layer)
 
-        if hook <= 0:
-            return (-1.0, -1.0)
+        if not edges or hook <= 0:
+            return (0.0, 0.0)
 
         tol = self.cover_side + 1.0
+        span_from, span_to = positions[0], positions[-1]
 
-        return (hook if any(abs(piece[0] - value) <= tol for value in coordinates) else -1.0,
-                hook if any(abs(piece[1] - value) <= tol for value in coordinates) else -1.0)
+        def hooked(value: float) -> bool:
+            return any(abs(value - coord) <= tol and
+                       edge_from - tol <= span_to and span_from <= edge_to + tol
+                       for coord, edge_from, edge_to in edges)
+
+        return (hook if hooked(piece[0]) else 0.0,
+                hook if hooked(piece[1]) else 0.0)
+
+
+    def _create_bar_with_edge_stirrups(self,
+                                       layer: LayerConfig,
+                                       length: float,
+                                       start_leg: float,
+                                       end_leg: float) -> AllplanReinf.BendingShape:
+        """Stab mit angebogenem Randbügel an einem oder beiden Enden.
+
+        Der Bügel hat dieselbe Form wie ein einzelner U-Bügel: Der Stab
+        bildet den unteren Schenkel, am Rand geht er über den Steg nach
+        oben und mit dem oberen Schenkel wieder nach innen. Ein einfacher
+        Haken (nur eine Biegung) reicht dafür nicht, deshalb wird die Form
+        über eine Freiform aus Punkten aufgebaut.
+        """
+
+        web = self._hook_length(layer)
+        leg = self.overlap_factor * layer.diameter - 0.5 * layer.diameter
+
+        points = []
+
+        if start_leg > 0:
+            points.append(AllplanGeo.Point2D(min(leg, length), web))
+            points.append(AllplanGeo.Point2D(0.0, web))
+
+        points.append(AllplanGeo.Point2D(0.0, 0.0))
+        points.append(AllplanGeo.Point2D(length, 0.0))
+
+        if end_leg > 0:
+            points.append(AllplanGeo.Point2D(length, web))
+            points.append(AllplanGeo.Point2D(length - min(leg, length), web))
+
+        model_angles = RotationUtil(90, 0, 0) if layer.direction == 'X' \
+            else RotationUtil(90, 0, 90)
+
+        return GeneralShapeBuilder.create_freeform_shape_with_hooks(
+            points, model_angles, self._shape_props(layer), 0.0, -1, -1)
 
 
     # ==================== Konturmodus: Randausbildung ====================
@@ -1755,11 +1807,15 @@ class SlabReinforcement():
         piece_from, piece_to = piece
 
         # Nettolänge: die Deckung steckt bereits in den Segmentgrenzen.
-        # An Kanten mit angebogenem Randbügel bekommt der Stab dort einen Haken.
-        start_hook, end_hook = self._piece_hooks(layer, piece)
+        # Liegt ein Ende auf einer Randkante mit angebogenem Bügel, wird der
+        # Stab als Freiform mit vollem U-Bügel aufgebaut.
+        start_leg, end_leg = self._piece_hooks(layer, piece, positions)
 
-        shape = self._create_straight_bar_shape(layer, piece_to - piece_from,
-                                                0.0, 0.0, start_hook, end_hook)
+        if start_leg > 0 or end_leg > 0:
+            shape = self._create_bar_with_edge_stirrups(layer, piece_to - piece_from,
+                                                        start_leg, end_leg)
+        else:
+            shape = self._create_straight_bar_shape(layer, piece_to - piece_from, 0.0, 0.0)
 
         first = positions[0]
 
