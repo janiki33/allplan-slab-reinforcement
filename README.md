@@ -41,6 +41,8 @@ PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modu
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
 tests/                                               65 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
+tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
+tools/Sync-SlabReinforcement.ps1                     Sync GitHub → lokales Allplan-Verzeichnis (Windows)
 ```
 
 ## Installation
@@ -74,6 +76,74 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
 > `.pyp`-Dateien werden dagegen bei jedem Start neu gelesen — deshalb kann
 > die Palette bereits neu aussehen, während noch das alte Skript läuft.
 > (Mit installiertem PythonParts-SDK übernimmt der `reloader` das Neuladen.)
+
+## Automatischer Abgleich GitHub → lokal (Windows)
+
+`tools/Sync-SlabReinforcement.ps1` holt die fünf benötigten Dateien direkt von
+`raw.githubusercontent.com` und schreibt sie in das Allplan-Benutzerverzeichnis.
+GitHub ist dabei die Quelle der Wahrheit — lokale Änderungen an diesen Dateien
+werden überschrieben. Geschrieben wird nur, wenn sich der Inhalt (SHA-256)
+unterscheidet; bei einer Änderung wird zusätzlich `__pycache__` geleert.
+
+Abgeglichen werden:
+
+| GitHub | lokal (unterhalb `-AllplanUsr`) |
+| --- | --- |
+| `PythonPartsScripts/SlabReinforcement/SlabReinforcementScript.py` | `PythonPartsScripts\SlabReinforcement\` |
+| `PythonPartsScripts/SlabReinforcement/contour_placement.py` | `PythonPartsScripts\SlabReinforcement\` |
+| `PythonPartsScripts/SlabReinforcement/opening_clipping.py` | `PythonPartsScripts\SlabReinforcement\` |
+| `PythonPartsScripts/SlabReinforcement/lap_splitting.py` | `PythonPartsScripts\SlabReinforcement\` |
+| `Library/SlabReinforcement/SlabReinforcement.pyp` | `Library\SlabReinforcement\` |
+
+### Per Doppelklick
+
+`tools/Update-SlabReinforcement.cmd` ist die Datei zum Anklicken. Sie sucht
+`Sync-SlabReinforcement.ps1` neben sich, lädt es sonst von GitHub (Ablage unter
+`%LOCALAPPDATA%\AllplanSlabReinforcementSync\`), führt den Abgleich mit dem
+Standardziel `J:\Allplan\Usr\Janosch` aus und lässt das Fenster mit dem Ergebnis
+offen stehen. Anderes Ziel oder anderer Branch: die Zeilen `set "TARGET=..."`
+bzw. `set "BRANCH=..."` oben in der Datei anpassen.
+
+Einmal herunterladen, z. B. auf den Desktop:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -OutFile "$env:USERPROFILE\Desktop\Update-SlabReinforcement.cmd" `
+  https://raw.githubusercontent.com/janiki33/allplan-slab-reinforcement/claude/slab-reinforcement-sync-nykay9/tools/Update-SlabReinforcement.cmd
+```
+
+Danach genügt ein Doppelklick, wann immer der lokale Stand aktualisiert werden
+soll. Schalter werden durchgereicht: `Update-SlabReinforcement.cmd -Install`
+richtet den automatischen Abgleich ein, `-Uninstall` entfernt ihn wieder.
+
+### Direkt über PowerShell
+
+Einmalig ausführen (Standardziel `J:\Allplan\Usr\Janosch`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\Sync-SlabReinforcement.ps1 -RemoveStale
+```
+
+Dauerhaft alle 10 Minuten und bei jeder Anmeldung (geplante Aufgabe anlegen):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\Sync-SlabReinforcement.ps1 -Install
+```
+
+Wieder entfernen: `-Uninstall`. Statt der geplanten Aufgabe geht auch ein
+Dauerlauf im Fenster: `-IntervalSeconds 300`.
+
+Nützliche Parameter: `-AllplanUsr <Pfad>` (anderes Zielverzeichnis),
+`-Branch <name>` (anderer Branch), `-LogFile <Pfad>` (Protokoll),
+`-RemoveStale` (löscht die veraltete `SlabReinforcement.py`, deren Name mit dem
+Paketordner kollidiert und den Import verhindert).
+
+> Das Skript kopiert Dateien, es startet Allplan nicht neu — nach einer
+> Aktualisierung der `.py` gilt weiterhin der Hinweis oben.
+
+Die geplante Aufgabe läuft im angemeldeten Benutzerkontext, weil das verbundene
+Laufwerk `J:` nur dort existiert. Meldet das Protokoll trotzdem
+„Zielverzeichnis nicht erreichbar", stattdessen den UNC-Pfad übergeben, z. B.
+`-AllplanUsr \\server\freigabe\Allplan\Usr\Janosch`.
 
 ## Fehlersuche
 

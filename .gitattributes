@@ -1,0 +1,5 @@
+# Batch-Dateien muessen CRLF behalten, sonst stolpert cmd.exe ueber Labels
+# und mehrzeilige Bloecke - auch beim Direktdownload von raw.githubusercontent.com.
+*.cmd -text
+*.bat -text
+*.ps1 -text
