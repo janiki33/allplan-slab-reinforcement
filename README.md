@@ -400,8 +400,8 @@ unvermeidlichen Zielkonflikt — deshalb die Palettenoption
 
 | Einstellung | Länge der Stufe | Folge |
 | --- | --- | --- |
-| **Kürzestes Eisen** (Default) | Schnittmenge aller Stäbe | Kein Stab verlässt den Beton, die seitliche Deckung ist überall eingehalten. Die längeren Stäbe verlieren bis zu `StepMaxLoss` an Verankerungslänge. |
-| **Längstes Eisen** | Hülle aller Stäbe | Die Stufe folgt der Schräge so eng wie möglich. Die kürzeren Stäbe ragen dafür um bis zu `StepMaxLoss` über ihre eigene Länge hinaus — also **in die seitliche Deckung hinein und darüber hinaus**. |
+| **Kürzestes Eisen** | Schnittmenge aller Stäbe | Kein Stab verlässt den Beton, die seitliche Deckung ist überall eingehalten. Die längeren Stäbe verlieren bis zu `StepMaxLoss` an Verankerungslänge. |
+| **Längstes Eisen** (Default) | Hülle aller Stäbe | Die Stufe folgt der Schräge so eng wie möglich. Die kürzeren Stäbe ragen dafür um bis zu `StepMaxLoss` über ihre eigene Länge hinaus — also **in die seitliche Deckung hinein und darüber hinaus**. |
 
 Beides zugleich geht nicht: eine Verlegung hat genau eine Stablänge. Wer
 die Stufe am längsten Stab vermisst, akzeptiert damit, dass die kürzeren
