@@ -15,7 +15,8 @@ keine Kopie kommerzieller Plugins.
 | v0.2.1 | Randausbildung je Kante (U-Randbügel / Anschlusseisen / separate Anschlusseisen / keine), Stoßfaktor, „Alle Lagen gleich", wählbare äußere Lagenrichtung, Allplan-Layer je Lage, Handles | umgesetzt |
 | v0.3 | ScriptObject-Struktur mit drei Eingabemodi (Rechteck-Drag / Polygon zeichnen / Element wählen), Scanline-Verlegung für polygonale Konturen, mehrere Öffnungen, Randverdichtung via `calculate_length_of_regions` | umgesetzt |
 | v0.3.3 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
-| v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Randbügel/Anschlusseisen an Polygonkanten, Diagonalzulagen an Öffnungsecken | Roadmap |
+| v0.4 | Verlegekonzept über Rechteckzerlegung (Rechtecke je Lage, Stoss an jeder Verlegungsgrenze, Abtreppung am längsten Stab), Randbügel und Anschlusseisen auch im Polygon-/Elementmodus | umgesetzt |
+| v0.5 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Diagonalzulagen an Öffnungsecken | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
 Original-Beispiele entwickelt und je Ausbaustufe von einem unabhängigen
@@ -40,7 +41,7 @@ PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modu
     opening_clipping.py                              Reine Band-/Kapp-Logik Rechteckmodus (ohne Allplan, testbar)
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
-tests/                                               66 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
+tests/                                               80 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
 tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
 tools/Sync-SlabReinforcement.ps1                     Sync GitHub → lokales Allplan-Verzeichnis (Windows)
 ```
@@ -227,12 +228,15 @@ verifiziert.
   zulaufenden Richtung; Außenhöhe auf ganze cm abgerundet, Schenkellänge =
   Stoßlänge − ø/2), „Anschlusseisen" (Lagenstäbe stehen um die Stoßlänge
   über den Rand über), „Separate Anschlusseisen" (eigene Stäbe der Länge
-  2 × Stoßlänge, mittig auf der Kante) oder „Keine". Die Stoßlänge ist als
+  2 × Stoßlänge, mittig auf der Kante) oder „Keine". Im Polygon- und
+  Elementmodus gilt die Option **je Konturkante**: Jede Kante bekommt die
+  Einstellung der Richtung, in die ihre Aussennormale zeigt — eine schräge
+  Kante also die der überwiegenden Richtung. Die Bügelschenkel zeigen
+  immer nach innen (Rotation = Innennormale − 90°). Die Stoßlänge ist als
   Stoßfaktor (Vielfaches von ø) konfigurierbar — bewusst kein Normwert.
   Randbügel und separate Anschlusseisen sparen den Bereich einer Öffnung
   aus, wenn diese den jeweiligen Randstreifen schneidet. Bekannte
-  Einschränkungen: Randbügel/Anschlusseisen gibt es nur im Rechteckmodus
-  (an freien Polygonkanten: Roadmap v0.4); bei aktiver Öffnung starten die
+  Einschränkungen: bei aktiver Öffnung starten die
   Hauptlagen-Bänder ihr Raster je Band neu, sodass Randbügel/Anschluss-
   eisen dort nicht zwingend mit den Lagenstäben fluchten; die Format-
   Eigenschaften (Stift/Farbe) wirken auf den Plattenkörper, die Bewehrung

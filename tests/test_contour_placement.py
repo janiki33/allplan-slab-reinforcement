@@ -442,5 +442,37 @@ class ZoneVariantTest(unittest.TestCase):
             self.assertEqual(len(set(zone.segments)), 1)
 
 
+class EdgeExtensionTest(unittest.TestCase):
+    """Anschlusseisen: Stäbe ragen an ausgewählten Konturkanten über den Rand."""
+
+    def test_extension_replaces_the_cover_at_that_edge(self):
+        plain = compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0)
+        self.assertEqual(plain[0].segments, ((40.0, 4960.0),))
+
+        # Kante 3 ist die linke Kante (von (0,4000) nach (0,0))
+        extended = compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
+                                        edge_extensions={3: 600.0})
+
+        self.assertEqual(extended[0].segments, ((-600.0, 4960.0),))
+
+    def test_other_edges_keep_their_cover(self):
+        extended = compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
+                                        edge_extensions={3: 600.0})
+
+        for bar in extended:
+            self.assertAlmostEqual(bar.segments[0][1], 4960.0, places=6)
+
+    def test_both_ends_can_be_extended(self):
+        extended = compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
+                                        edge_extensions={1: 600.0, 3: 600.0})
+
+        self.assertEqual(extended[0].segments, ((-600.0, 5600.0),))
+
+    def test_no_extensions_behaves_as_before(self):
+        self.assertEqual(compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0),
+                         compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
+                                              edge_extensions={}))
+
+
 if __name__ == '__main__':
     unittest.main()

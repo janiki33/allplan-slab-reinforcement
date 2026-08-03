@@ -73,7 +73,7 @@ def loop_bbox(loop: Loop) -> tuple[float, float, float, float]:
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def _crossings(loop: Loop, run_axis: int, coord: float) -> list[tuple[float, float]]:
+def _crossings(loop: Loop, run_axis: int, coord: float) -> list[tuple[float, float, int]]:
     """Schnittpunkte der Scanlinie (dist-Koordinate = coord) mit den Kanten
     des Loops.
 
@@ -82,12 +82,14 @@ def _crossings(loop: Loop, run_axis: int, coord: float) -> list[tuple[float, flo
 
     Returns:
         Liste (Koordinate auf der run-Achse, sin des Winkels zwischen
-        Stabrichtung und geschnittener Kante), aufsteigend sortiert.
-        sin = 1 bei einer Kante rechtwinklig zum Stab, kleiner bei Schrägen.
+        Stabrichtung und geschnittener Kante, Index der Kante), aufsteigend
+        sortiert. sin = 1 bei einer Kante rechtwinklig zum Stab, kleiner bei
+        Schrägen. Der Kantenindex erlaubt es, je Kante unterschiedlich zu
+        verfahren (z. B. Anschlusseisen über den Rand hinaus).
     """
 
     dist_axis = 1 - run_axis
-    crossings: list[tuple[float, float]] = []
+    crossings: list[tuple[float, float, int]] = []
 
     for i, p1 in enumerate(loop):
         p2 = loop[(i + 1) % len(loop)]
@@ -106,7 +108,7 @@ def _crossings(loop: Loop, run_axis: int, coord: float) -> list[tuple[float, flo
 
             sin_alpha = abs(edge_dist) / edge_length if edge_length else 1.0
 
-            crossings.append((p1[run_axis] + t * edge_run, sin_alpha))
+            crossings.append((p1[run_axis] + t * edge_run, sin_alpha, i))
 
     crossings.sort()
 
@@ -142,23 +144,31 @@ def _intervals_at(loop: Loop,
                   coord: float,
                   cover: float = 0.0,
                   max_setback: float = 0.0,
-                  as_hole: bool = False) -> list[Interval]:
+                  as_hole: bool = False,
+                  extensions: dict[int, float] | None = None) -> list[Interval]:
     """Innen-Intervalle des Loops entlang der run-Achse bei coord.
 
     Mit cover > 0 werden die Intervalle um den kantenabhängigen Rückversatz
     verkleinert (Kontur) bzw. vergrößert (as_hole=True für Öffnungen, deren
     Rand ebenfalls Deckung braucht).
+
+    extensions: je Kantenindex ein Überstand, um den der Stab über diese
+    Kante hinausragt (Anschlusseisen). Ein Überstand ersetzt die Deckung an
+    diesem Ende.
     """
 
     crossings = _crossings(loop, run_axis, coord)
+    extra = extensions or {}
 
     intervals: list[Interval] = []
 
     for i in range(0, len(crossings) - 1, 2):
-        (start, sin_start), (end, sin_end) = crossings[i], crossings[i + 1]
+        (start, sin_start, edge_start), (end, sin_end, edge_end) = crossings[i], crossings[i + 1]
 
-        setback_start = edge_setback(cover, sin_start, max_setback)
-        setback_end = edge_setback(cover, sin_end, max_setback)
+        setback_start = -extra[edge_start] if edge_start in extra \
+            else edge_setback(cover, sin_start, max_setback)
+        setback_end = -extra[edge_end] if edge_end in extra \
+            else edge_setback(cover, sin_end, max_setback)
 
         if as_hole:
             intervals.append((start - setback_start, end + setback_end))
@@ -251,7 +261,8 @@ def compute_contour_bars(contour: Loop,
                          edge_zone_length: float = 0.0,
                          edge_zone_spacing: float = 0.0,
                          max_setback: float = 0.0,
-                         dist_margin: float | None = None) -> list[ContourBar]:
+                         dist_margin: float | None = None,
+                         edge_extensions: dict[int, float] | None = None) -> list[ContourBar]:
     """Scanline-Verlegung: für jede Scan-Position die Stab-Segmente
     innerhalb der Kontur abzüglich der Öffnungen.
 
@@ -280,7 +291,8 @@ def compute_contour_bars(contour: Loop,
     for position in scan_positions(dist_min, dist_max, spacing,
                                    edge_zone_length, edge_zone_spacing):
         intervals = _intervals_at(contour, run_axis, position,
-                                  side_cover, max_setback)
+                                  side_cover, max_setback,
+                                  extensions=edge_extensions)
 
         holes: list[Interval] = []
         for opening in openings:

@@ -27,6 +27,7 @@ Alle Längenangaben in mm (Allplan-Standardeinheit).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -141,7 +142,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.4.0'
+SCRIPT_VERSION = '0.4.1'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -696,10 +697,8 @@ class SlabReinforcement():
 
             handle_list = self._create_handles()
         else:
-            if any(side != SIDE_NONE for side in (self.side_left, self.side_right,
-                                                  self.side_bottom, self.side_top)):
-                print('SlabReinforcement: Randbügel/Anschlusseisen werden im '
-                      'Polygon-/Elementmodus (noch) nicht erzeugt')
+            for placement in self._create_contour_edge_reinforcement():
+                reinf_ele_list.append(placement)
 
             for layer in self.layers:
                 for placement in self._create_contour_layer_placements(layer):
@@ -1286,6 +1285,212 @@ class SlabReinforcement():
         return placements
 
 
+    # ==================== Konturmodus: Randausbildung ====================
+
+    def _contour_edges(self) -> list[tuple[int, str, float, tuple, tuple]]:
+        """Klassifiziert jede Konturkante nach ihrer Aussennormalen.
+
+        Die vier Palettenoptionen (Links/Rechts/Unten/Oben) gelten damit
+        auch für Polygone: Jede Kante bekommt die Option der Richtung, in
+        die ihre Aussennormale zeigt.
+
+        Returns:
+            Liste (Kantenindex, Option, Innennormalen-Winkel [Grad],
+            Startpunkt, Endpunkt)
+        """
+
+        if not self.contour:
+            return []
+
+        # Umlaufsinn bestimmen, damit die Normale wirklich nach aussen zeigt
+        area = loop_area(self.contour)
+        sign = 1.0 if area > 0 else -1.0
+
+        edges = []
+
+        for index, start in enumerate(self.contour):
+            end = self.contour[(index + 1) % len(self.contour)]
+
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length = math.hypot(dx, dy)
+
+            if length < 1.0:
+                continue
+
+            # Aussennormale bei positivem Umlaufsinn: (dy, -dx)
+            nx, ny = sign * dy / length, -sign * dx / length
+
+            if abs(nx) >= abs(ny):
+                option = self.side_right if nx > 0 else self.side_left
+            else:
+                option = self.side_top if ny > 0 else self.side_bottom
+
+            # Innennormale (dorthin zeigen die Bügelschenkel)
+            inward = math.degrees(math.atan2(-ny, -nx))
+
+            edges.append((index, option, inward, start, end))
+
+        return edges
+
+
+    def _edge_extensions(self, layer: LayerConfig) -> dict[int, float]:
+        """Überstand je Konturkante für Anschlusseisen dieser Lage."""
+
+        lap = self.overlap_factor * layer.diameter
+
+        return {index: lap for index, option, _, _, _ in self._contour_edges()
+                if option == SIDE_CONNECT}
+
+
+    def _create_contour_edge_reinforcement(self) -> list[AllplanReinf.BarPlacement]:
+        """Randbügel und separate Anschlusseisen entlang der Konturkanten.
+
+        Aufbau wie im Deckenplatte-PythonPart: offene U-Bügel umgreifen die
+        beiden Lagen, deren Stäbe senkrecht auf die Kante zulaufen; die
+        Schenkel zeigen nach innen. Separate Anschlusseisen sind gerade
+        Stäbe der Länge 2 x Übergreifung, mittig auf der Kante.
+        """
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        for index, option, inward, start, end in self._contour_edges():
+            if option in (SIDE_NONE, SIDE_CONNECT):
+                continue
+
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length = math.hypot(dx, dy)
+
+            # Stäbe, die senkrecht auf diese Kante zulaufen
+            direction = 'X' if abs(math.cos(math.radians(inward))) >= \
+                abs(math.sin(math.radians(inward))) else 'Y'
+
+            layers = [layer for layer in self.layers if layer.direction == direction]
+            bottom = next((layer for layer in layers if not layer.is_top), None)
+            top = next((layer for layer in layers if layer.is_top), None)
+
+            if bottom is None or top is None:
+                continue
+
+            # Verlegelinie: Kante um die Deckung nach innen versetzt und an
+            # beiden Enden um die Deckung eingezogen
+            ux, uy = dx / length, dy / length
+            ix, iy = math.cos(math.radians(inward)), math.sin(math.radians(inward))
+            offset = self.concrete_cover
+
+            from_2d = (start[0] + ix * offset + ux * offset,
+                       start[1] + iy * offset + uy * offset)
+            to_2d = (end[0] + ix * offset - ux * offset,
+                     end[1] + iy * offset - uy * offset)
+
+            if math.hypot(to_2d[0] - from_2d[0], to_2d[1] - from_2d[1]) < bottom.spacing:
+                continue
+
+            if option == SIDE_STIRRUP:
+                placement = self._create_contour_stirrup(bottom, top, inward,
+                                                         from_2d, to_2d)
+            else:
+                placement = self._create_contour_separate_bar(bottom, inward,
+                                                              from_2d, to_2d)
+
+            if placement is not None:
+                placements.append(placement)
+
+        return placements
+
+
+    def _create_contour_stirrup(self,
+                                bottom: LayerConfig,
+                                top: LayerConfig,
+                                inward: float,
+                                from_2d: tuple,
+                                to_2d: tuple):
+        """Offener U-Randbügel entlang einer Konturkante."""
+
+        diameter = bottom.diameter
+
+        # Aussenmass über beide Lagen, auf ganze cm abgerundet; der
+        # ShapeBuilder bekommt das Achsmass (Aussenmass - ø)
+        outer_height = (top.z_axis + top.diameter / 2.0) - \
+                       (bottom.z_axis - bottom.diameter / 2.0)
+        web_height = int(outer_height / 10.0) * 10.0 - diameter
+        leg_length = self.overlap_factor * diameter - 0.5 * diameter
+
+        if web_height <= 0 or leg_length <= 0:
+            print(f'SlabReinforcement: Randbügel entfällt — Bügelhöhe/Schenkel '
+                  f'nicht darstellbar')
+            return None
+
+        shape_props = ReinforcementShapeProperties.rebar(
+            diameter, bottom.bending_roller, bottom.steel_grade,
+            self.concrete_grade, AllplanReinf.BendingShapeType.OpenStirrup)
+
+        # Ry = -90 stellt den Steg senkrecht, Rz richtet die Schenkel nach
+        # innen (Vorbild: Rz = 0 / 180 / -90 / 90 für unten/oben/links/rechts,
+        # allgemein also Innennormale - 90 Grad)
+        angles = RotationAngles(0, -90, inward - 90.0)
+
+        shape = GeneralShapeBuilder.create_open_stirrup(
+            web_height, leg_length, angles, shape_props,
+            ConcreteCoverProperties(0.0, 0.0, 0.0, 0.0), -1, -1, 0.0, 0.0)
+
+        if not shape.IsValid():
+            print('SlabReinforcement: Randbügel-Shape ungültig — übersprungen')
+            return None
+
+        placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+            self._next_position(), shape,
+            self._pnt(from_2d[0], from_2d[1], bottom.z_axis),
+            self._pnt(to_2d[0], to_2d[1], bottom.z_axis),
+            0.0, 0.0, bottom.spacing)
+
+        layer_id = self.build_ele.LayerStirrupX.value if bottom.direction == 'X' \
+            else self.build_ele.LayerStirrupY.value
+
+        self._set_placement_layer(placement, layer_id)
+
+        return placement
+
+
+    def _create_contour_separate_bar(self,
+                                     layer: LayerConfig,
+                                     inward: float,
+                                     from_2d: tuple,
+                                     to_2d: tuple):
+        """Separates Anschlusseisen: gerader Stab der Länge 2 x Übergreifung,
+        mittig auf der Kante, senkrecht dazu.
+        """
+
+        lap = self.overlap_factor * layer.diameter
+
+        # Der Stab steht je zur Hälfte in und ausserhalb der Platte; die
+        # Verlegelinie liegt deshalb um die Deckung zurück auf der Kante
+        ix, iy = math.cos(math.radians(inward)), math.sin(math.radians(inward))
+        back = self.concrete_cover
+
+        bar = LayerConfig(f'Separates Anschlusseisen {layer.direction}',
+                          layer.direction, layer.is_top, layer.diameter,
+                          layer.spacing, layer.steel_grade)
+        bar.z_axis = layer.z_axis
+        bar.bending_roller = layer.bending_roller
+        bar.allplan_layer = layer.allplan_layer
+
+        shape = self._create_straight_bar_shape(bar, 2 * lap, 0.0, 0.0)
+
+        # Stabanfang: von der Kante aus lap nach aussen
+        start = (from_2d[0] - ix * back - ix * lap, from_2d[1] - iy * back - iy * lap)
+        end = (to_2d[0] - ix * back - ix * lap, to_2d[1] - iy * back - iy * lap)
+
+        placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+            self._next_position(), shape,
+            self._pnt(start[0], start[1], bar.z_axis),
+            self._pnt(end[0], end[1], bar.z_axis),
+            0.0, 0.0, bar.spacing)
+
+        self._set_placement_layer(placement, bar.allplan_layer)
+
+        return placement
+
+
     # ==================== Konturmodus (Scanline) ====================
 
     def _create_contour_layer_placements(self, layer: LayerConfig) -> list[AllplanReinf.BarPlacement]:
@@ -1312,7 +1517,8 @@ class SlabReinforcement():
             edge_zone_length=self.edge_zone_length if self.edge_zones_active else 0.0,
             edge_zone_spacing=self.edge_zone_spacing if self.edge_zones_active else 0.0,
             max_setback=self.max_edge_setback,
-            dist_margin=self.concrete_cover + layer.diameter / 2.0)
+            dist_margin=self.concrete_cover + layer.diameter / 2.0,
+            edge_extensions=self._edge_extensions(layer))
 
         # Schritt 1: Zerlegung in Rechtecke und Abtreppungszonen
         zones = decompose_into_zones(bars, self.contour, run_axis,
