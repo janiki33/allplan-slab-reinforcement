@@ -35,7 +35,7 @@ getestet. Beim ersten Live-Test gezielt prüfen:
 ```
 Library/SlabReinforcement/SlabReinforcement.pyp      Palettendefinition (UI)
 PythonPartsScripts/SlabReinforcement/
-    SlabReinforcement.py                             ScriptObject (Eingabemodi) + Placement-Engine
+    SlabReinforcementScript.py                       ScriptObject (Eingabemodi) + Placement-Engine
     opening_clipping.py                              Reine Band-/Kapp-Logik Rechteckmodus (ohne Allplan, testbar)
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
@@ -73,8 +73,8 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
 Beim Start des PythonParts sollte im Trace stehen:
 
 ```
-Load SlabReinforcement.py (Version 0.3.1)
-SlabReinforcement 0.3.1: create_script_object
+Load SlabReinforcementScript.py (Version 0.3.2)
+SlabReinforcement 0.3.2: create_script_object
 SlabReinforcement: start_input, Modus "Polygon zeichnen"
 ```
 
@@ -86,17 +86,22 @@ SlabReinforcement: start_input, Modus "Polygon zeichnen"
 **Doppelte Skriptdateien:** Allplan sucht die `.py` der Reihe nach in
 `Prg`, `Etc`, `Std`, `Usr`, `Prj` und nimmt die **erste** gefundene. Eine
 vergessene Kopie an früherer Stelle überschattet die neue dauerhaft. Prüfen
-mit `dir /s /B SlabReinforcement.py` über das Allplan-Verzeichnis; alle
+mit `dir /s /B SlabReinforcement*.py` über das Allplan-Verzeichnis; alle
 Dubletten bis auf die gewollte löschen. Ebenso einen eventuell
 mitkopierten `__pycache__`-Ordner im Zielverzeichnis löschen.
 
-**Import der Nachbarmodule:** `SlabReinforcement.py` liegt im gleichnamigen
-Ordner. Ein absoluter Import (`from SlabReinforcement.contour_placement …`)
-scheitert daher, sobald Allplan das Skript selbst als Modul
-`SlabReinforcement` lädt (*„is not a package"*). Deshalb wird — wie im
-offiziellen Beispiel `ArchitectureExamples/Objects/DoorOpening.py`
-(`from .OpeningBase import OpeningBase`) — der **relative** Import benutzt,
-mit `sys.path`-Fallback für den anderen Ladefall. Ein `__init__.py` ist
+**Skriptname ≠ Ordnername:** Das Skript heisst `SlabReinforcementScript.py`
+und liegt im Ordner `SlabReinforcement`. Hiess es gleich wie sein Ordner,
+meldete Allplan `Script SlabReinforcement.SlabReinforcement not found` —
+in keinem offiziellen Beispiel trägt ein Skript den Namen seines
+Ordners. Wird die Struktur geändert, muss der `<Script><Name>`-Eintrag der
+`.pyp` mitgezogen werden.
+
+**Import der Nachbarmodule:** `_load_helper_modules()` probiert der Reihe
+nach den relativen Import (wie `ArchitectureExamples/Objects/DoorOpening.py`
+mit `from .OpeningBase import OpeningBase`), dann den flachen Import über
+`sys.path`, dann das direkte Laden über den Dateipfad. Damit funktioniert
+das Skript unabhängig davon, wie Allplan es lädt; ein `__init__.py` ist
 nicht nötig (der Referenzordner hat auch keines).
 
 ## Bedienung / Parameter

@@ -1,9 +1,9 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <Element xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://pythonparts.allplan.com/2026/schemas/PythonPart.xsd">
   <Script>
-    <Name>SlabReinforcement\SlabReinforcement.py</Name>
+    <Name>SlabReinforcement\SlabReinforcementScript.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.3</Version>
+    <Version>0.3.2</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>

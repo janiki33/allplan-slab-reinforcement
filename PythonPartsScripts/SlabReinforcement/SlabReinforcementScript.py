@@ -54,29 +54,86 @@ from TypeCollections.HandleList import HandleList
 from TypeCollections.ModelEleList import ModelEleList
 from Utils.HandleCreator import HandleCreator
 
-# Nachbarmodule im selben Ordner: relativer Import wie im offiziellen
-# Beispiel (ArchitectureExamples/Objects/DoorOpening.py: "from .OpeningBase
-# import OpeningBase"). Ein absoluter Import "from SlabReinforcement.x"
-# scheitert, sobald Allplan dieses Skript selbst als Modul
-# "SlabReinforcement" lädt (Namenskollision Modul <-> Ordner).
-# Der Fallback greift, falls das Skript ohne Paketkontext geladen wird.
-try:
-    from .contour_placement import (compute_contour_bars, group_bars_into_steps,
-                                    loop_area, loop_bbox, split_closed_loops)
-    from .lap_splitting import split_with_preferred_joints, stagger_shift
-    from .opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
-                                   compute_placement_bands)
-except ImportError:
+def _load_helper_modules():
+    """Lädt die drei Nachbarmodule aus demselben Ordner.
+
+    Allplan kann ein Skript auf verschiedene Arten laden (als Paketmodul
+    <Ordner>.<Skript>, als Top-Level-Modul oder per exec ohne Paketkontext).
+    Deshalb werden nacheinander drei Wege versucht:
+        1. relativer Import — wie im offiziellen Beispiel
+           ArchitectureExamples/Objects/DoorOpening.py
+           ("from .OpeningBase import OpeningBase")
+        2. Ordner auf sys.path legen und flach importieren
+        3. Direktes Laden über den Dateipfad
+    Schlägt alles fehl, wird die ursprüngliche Ursache weitergereicht,
+    damit sie im Trace-Fenster sichtbar wird.
+    """
+
+    names = ('contour_placement', 'lap_splitting', 'opening_clipping')
+
+    try:
+        from . import contour_placement, lap_splitting, opening_clipping   # noqa: F401
+        return contour_placement, lap_splitting, opening_clipping
+    except Exception as relative_error:                # noqa: BLE001
+        first_error = relative_error
+
+    import importlib
+    import importlib.util
     import os
     import sys
 
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    if '__file__' in globals():
+        folder = os.path.dirname(os.path.abspath(__file__))
+    else:
+        # Ohne __file__ (Laden per exec) den Ordner über sys.path suchen
+        folder = next((os.path.join(entry, 'SlabReinforcement')
+                       for entry in sys.path
+                       if os.path.isfile(os.path.join(entry, 'SlabReinforcement',
+                                                      'contour_placement.py'))),
+                      None)
 
-    from contour_placement import (compute_contour_bars, group_bars_into_steps,
-                                   loop_area, loop_bbox, split_closed_loops)
-    from lap_splitting import split_with_preferred_joints, stagger_shift
-    from opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
-                                  compute_placement_bands)
+        if folder is None:
+            raise first_error
+
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+
+    try:
+        return tuple(importlib.import_module(name) for name in names)
+    except Exception:                                  # noqa: BLE001
+        pass
+
+    modules = []
+
+    for name in names:
+        spec = importlib.util.spec_from_file_location(
+            f'SlabReinforcement_{name}', os.path.join(folder, f'{name}.py'))
+
+        if spec is None or spec.loader is None:
+            raise first_error
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        modules.append(module)
+
+    return tuple(modules)
+
+
+_contour_placement, _lap_splitting, _opening_clipping = _load_helper_modules()
+
+compute_contour_bars = _contour_placement.compute_contour_bars
+group_bars_into_steps = _contour_placement.group_bars_into_steps
+loop_area = _contour_placement.loop_area
+loop_bbox = _contour_placement.loop_bbox
+split_closed_loops = _contour_placement.split_closed_loops
+
+split_with_preferred_joints = _lap_splitting.split_with_preferred_joints
+stagger_shift = _lap_splitting.stagger_shift
+
+compute_edge_bar_runs = _opening_clipping.compute_edge_bar_runs
+compute_edge_strip_segments = _opening_clipping.compute_edge_strip_segments
+compute_placement_bands = _opening_clipping.compute_placement_bands
 
 if TYPE_CHECKING:
     from __BuildingElementStubFiles.SlabReinforcementBuildingElement import \
@@ -84,11 +141,11 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.3.1'
+SCRIPT_VERSION = '0.3.2'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
-print(f'Load SlabReinforcement.py (Version {SCRIPT_VERSION})')
+print(f'Load SlabReinforcementScript.py (Version {SCRIPT_VERSION})')
 
 # Optionen der Seiten-Combos (müssen den ValueList-Einträgen der .pyp entsprechen)
 SIDE_STIRRUP = 'Randbügel'
