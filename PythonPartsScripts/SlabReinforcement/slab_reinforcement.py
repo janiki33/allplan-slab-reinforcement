@@ -146,6 +146,8 @@ opening_edge_bars = _opening_reinforcement.opening_edge_bars
 corner_diagonals = _opening_reinforcement.corner_diagonals
 clip_bar = _opening_reinforcement.clip_bar
 group_equal_bars = _opening_reinforcement.group_equal_bars
+outward_normals = _opening_reinforcement.outward_normals
+point_in_loop = _opening_reinforcement.point_in_loop
 
 if TYPE_CHECKING:
     from __BuildingElementStubFiles.SlabReinforcementBuildingElement import \
@@ -153,7 +155,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.5.1'
+SCRIPT_VERSION = '0.5.2'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -494,6 +496,11 @@ class SlabReinforcementScript(BaseScriptObject):
             points = [(p.X, p.Y) for p in geometry.Points]
             self._set_contour_from_loops(split_closed_loops(points))
 
+            # Aussparungen sind in Allplan eigene Kindelemente der Decke —
+            # sie stecken nicht in deren Konturpolygon und müssen deshalb
+            # zusätzlich gelesen werden. Ohne sie anzutippen.
+            self.openings += self._child_openings(sel_element)
+
         else:
             print('SlabReinforcement: Geometrie des gewählten Elements wird '
                   'nicht unterstützt — Rechteck aus der Palette wird verwendet')
@@ -512,6 +519,87 @@ class SlabReinforcementScript(BaseScriptObject):
 
         self.contour = loops[0]
         self.openings = self._filter_openings(loops[1:])
+
+
+    def _child_openings(self, sel_element) -> list[list[tuple[float, float]]]:
+        """Aussparungen der gewählten Decke aus deren Kindelementen lesen.
+
+        In Allplan ist eine Aussparung ein eigenes Element unterhalb der
+        Decke, nicht Teil ihres Konturpolygons. Über
+        `BaseElementAdapterChildElementsService.GetChildModelElements`
+        (2026-API-Referenz) sind sie erreichbar, ohne dass der Anwender sie
+        einzeln antippen muss.
+
+        Gefiltert wird **nicht** über eine Typ-UUID: welche Konstante die
+        Aussparung bezeichnet, liess sich in der Doku nicht belegen. Statt
+        zu raten, wird jedes Kindelement genommen, aus dem sich eine
+        geschlossene Kontur lesen lässt, die vollständig innerhalb der
+        Plattenkontur liegt und kleiner ist als diese — das trifft auf
+        Aussparungen zu und auf sonst kaum ein Kindelement.
+        """
+
+        if self.build_ele.OpeningMode.value not in (OPENING_AUTO, OPENING_AUTO_DRAW) \
+                or self.contour is None:
+            return []
+
+        service = getattr(AllplanEleAdapter,
+                          'BaseElementAdapterChildElementsService', None)
+
+        if service is None or not hasattr(service, 'GetChildModelElements'):
+            print('SlabReinforcement: BaseElementAdapterChildElementsService '
+                  'nicht verfügbar — Aussparungselemente werden nicht gelesen')
+            return []
+
+        try:
+            children = service.GetChildModelElements(sel_element)
+        except Exception as error:                     # noqa: BLE001
+            print(f'SlabReinforcement: Kindelemente nicht lesbar ({error})')
+            return []
+
+        loops: list[list[tuple[float, float]]] = []
+
+        for child in children:
+            loops += self._loops_from_element(child)
+
+        inside = [loop for loop in loops if self._loop_is_inside_contour(loop)]
+
+        print(f'SlabReinforcement: {len(inside)} Aussparungselement(e) erkannt')
+
+        return self._filter_openings(inside)
+
+
+    def _loops_from_element(self, element) -> list[list[tuple[float, float]]]:
+        """Geschlossene Grundriss-Loops eines Elements, so defensiv wie
+        möglich: Polygon-/Polylinien-Geometrie über `Points`, Körper über
+        ihre Eckpunkte (konvexe Hülle wäre falsch, deshalb nur `Points`).
+        """
+
+        try:
+            geometry = AllplanBaseEle.GetElement(element).GetGeometryObject()
+        except Exception:                              # noqa: BLE001
+            return []
+
+        if geometry is None or not hasattr(geometry, 'Points'):
+            return []
+
+        try:
+            points = [(p.X, p.Y) for p in geometry.Points]
+        except Exception:                              # noqa: BLE001
+            return []
+
+        return [loop for loop in split_closed_loops(points) if len(loop) >= 3]
+
+
+    def _loop_is_inside_contour(self, loop: list[tuple[float, float]]) -> bool:
+        """Liegt der Loop vollständig in der Plattenkontur und ist er
+        kleiner als sie? (Die Kontur selbst darf nicht als Aussparung
+        durchgehen.)
+        """
+
+        if abs(loop_area(loop)) >= abs(loop_area(self.contour)) * 0.999:
+            return False
+
+        return all(point_in_loop(point, self.contour) for point in loop)
 
 
     def _filter_openings(self,
@@ -661,6 +749,7 @@ class SlabReinforcement():
         self.concrete_cover = self.cover_side
 
         self.stirrup_style = build_ele.StirrupStyle.value
+        self.opening_stirrup_style = build_ele.OpeningStirrupStyle.value
         self.concrete_grade = build_ele.ConcreteGrade.value
 
         # Seitenausbildung und Stoßlänge (als Vielfaches des Stabdurchmessers)
@@ -1495,28 +1584,41 @@ class SlabReinforcement():
         Kanten, in die die Stäbe hineinlaufen — Kanten parallel zur
         Stabrichtung scheiden aus. Schrägen sind ausdrücklich dabei: dort
         entsteht die Abtreppung, und auch deren Stäbe brauchen einen
-        Abschlussbügel.
+        Abschlussbügel. Plattenrand und Aussparungsrand haben je eine
+        eigene Palettenoption (StirrupStyle bzw. OpeningStirrupStyle).
 
         Returns:
             Liste (Startpunkt, Endpunkt) der Kante als 2D-Tupel.
         """
 
-        if self.stirrup_style == 'Einzeln' or layer.is_top or not self.contour:
+        if layer.is_top or not self.contour:
             return []
 
         dist_axis = 1 if layer.direction == 'X' else 0
 
         edges = []
 
-        for _, option, _, start, end, _ in self._contour_edges():
-            if option != SIDE_STIRRUP:
-                continue
+        if self.stirrup_style != 'Einzeln':
+            for _, option, _, start, end, _ in self._contour_edges():
+                if option != SIDE_STIRRUP:
+                    continue
 
-            # Kante parallel zur Stabrichtung -> der Stab läuft nicht hinein
-            if abs(end[dist_axis] - start[dist_axis]) < 1.0:
-                continue
+                # Kante parallel zur Stabrichtung -> der Stab läuft nicht hinein
+                if abs(end[dist_axis] - start[dist_axis]) < 1.0:
+                    continue
 
-            edges.append((start, end))
+                edges.append((start, end))
+
+        # Aussparungskanten: gleiche Regel, eigene Palettenoption
+        if self.opening_stirrup_style == 'Am Eisen angebogen':
+            for opening in self.contour_openings:
+                for index, start in enumerate(opening):
+                    end = opening[(index + 1) % len(opening)]
+
+                    if abs(end[dist_axis] - start[dist_axis]) < 1.0:
+                        continue
+
+                    edges.append((start, end))
 
         return edges
 
@@ -1730,7 +1832,8 @@ class SlabReinforcement():
                              is_top: bool,
                              stack_index: int,
                              diameter: float,
-                             spacing: float) -> LayerConfig | None:
+                             spacing: float,
+                             allplan_layer: int | None = None) -> LayerConfig | None:
         """Zulagenebene innerhalb der Hauptlagen.
 
         Unten liegen die Zulagen **oberhalb** der inneren unteren Lage, oben
@@ -1768,7 +1871,8 @@ class SlabReinforcement():
         layer = LayerConfig(name, 'X', is_top, diameter, spacing,
                             reference.steel_grade)
         layer.z_axis = z_axis
-        layer.allplan_layer = reference.allplan_layer
+        layer.allplan_layer = allplan_layer if allplan_layer is not None \
+            else reference.allplan_layer
         layer.bending_roller = AllplanReinf.BendingRollerService.GetBendingRollerFactor(
             diameter, layer.steel_grade, -1, False)
 
@@ -1864,7 +1968,8 @@ class SlabReinforcement():
                     diameter=build_ele.EdgeBarDiameter.value,
                     spacing=build_ele.EdgeBarSpacing.value,
                     name='Randzulage Aussparung',
-                    bars_by_stack=self._opening_edge_bars_by_stack(opening))
+                    bars_by_stack=self._opening_edge_bars_by_stack(opening),
+                    allplan_layer=build_ele.LayerOpeningEdge.value)
 
             if diagonal_active:
                 diagonals = corner_diagonals(
@@ -1879,7 +1984,83 @@ class SlabReinforcement():
                     diameter=build_ele.DiagonalDiameter.value,
                     spacing=build_ele.DiagonalSpacing.value,
                     name='Diagonalzulage Aussparung',
-                    bars_by_stack={2: diagonals})
+                    bars_by_stack={2: diagonals},
+                    allplan_layer=build_ele.LayerOpeningDiagonal.value)
+
+            placements += self._create_opening_stirrups(opening)
+
+        return placements
+
+
+    def _create_opening_stirrups(self, opening: list) -> list[AllplanReinf.BarPlacement]:
+        """Separate U-Randbügel entlang der Aussparungskanten.
+
+        Aufbau identisch zu den Randbügeln der Plattenkante: der offene
+        U-Bügel umgreift die beiden Lagen, deren Stäbe senkrecht auf die
+        Kante zulaufen, die Schenkel zeigen in den Beton hinein — bei einer
+        Aussparung also von der Öffnung weg.
+
+        Bei "Am Eisen angebogen" entsteht hier nichts: dann bekommen die
+        Lagenstäbe, die an der Aussparung enden, den Bügel angebogen
+        (siehe _hook_edges).
+        """
+
+        if self.opening_stirrup_style != 'Einzeln':
+            return []
+
+        spacing = self.build_ele.OpeningStirrupSpacing.value
+
+        if spacing <= 0:
+            return []
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        normals = outward_normals(opening)
+
+        for index, start in enumerate(opening):
+            end = opening[(index + 1) % len(opening)]
+
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length = math.hypot(dx, dy)
+
+            if length < 1.0:
+                continue
+
+            # Die Schenkel zeigen in den Beton: das ist bei einer Aussparung
+            # die Aussennormale des Öffnungspolygons
+            nx, ny = normals[index]
+            inward = math.degrees(math.atan2(ny, nx))
+
+            # Stäbe, die senkrecht auf diese Kante zulaufen
+            direction = 'X' if abs(nx) >= abs(ny) else 'Y'
+
+            layers = [layer for layer in self.layers if layer.direction == direction]
+            bottom = next((layer for layer in layers if not layer.is_top), None)
+            top = next((layer for layer in layers if layer.is_top), None)
+
+            if bottom is None or top is None:
+                continue
+
+            # Verlegelinie: Kante um die Deckung nach aussen versetzt und an
+            # beiden Enden um die Deckung eingezogen
+            ux, uy = dx / length, dy / length
+            offset = self.cover_side
+
+            from_2d = (start[0] + nx * offset + ux * offset,
+                       start[1] + ny * offset + uy * offset)
+            to_2d = (end[0] + nx * offset - ux * offset,
+                     end[1] + ny * offset - uy * offset)
+
+            if math.hypot(to_2d[0] - from_2d[0], to_2d[1] - from_2d[1]) < spacing:
+                continue
+
+            placement = self._create_contour_stirrup(
+                bottom, top, inward, from_2d, to_2d,
+                spacing=spacing,
+                allplan_layer=self.build_ele.LayerOpeningStirrup.value)
+
+            if placement is not None:
+                placements.append(placement)
 
         return placements
 
@@ -1918,7 +2099,8 @@ class SlabReinforcement():
                             diameter: float,
                             spacing: float,
                             name: str,
-                            bars_by_stack: dict) -> list[AllplanReinf.BarPlacement]:
+                            bars_by_stack: dict,
+                            allplan_layer: int | None = None) -> list[AllplanReinf.BarPlacement]:
         """Schneidet die Stäbe an Kontur und übrigen Aussparungen ab und
         verlegt sie in allen vier Zulagenebenen (unten/oben je Stapel).
         """
@@ -1945,7 +2127,7 @@ class SlabReinforcement():
             for is_top in (False, True):
                 layer = self._opening_reinf_layer(
                     f'{name} {"oben" if is_top else "unten"} {stack_index + 1}',
-                    is_top, stack_index, diameter, spacing)
+                    is_top, stack_index, diameter, spacing, allplan_layer)
 
                 if layer is None:
                     continue
@@ -2012,6 +2194,7 @@ class SlabReinforcement():
             if math.hypot(to_2d[0] - from_2d[0], to_2d[1] - from_2d[1]) < bottom.spacing:
                 continue
 
+
             if option == SIDE_STIRRUP:
                 placement = self._create_contour_stirrup(bottom, top, inward,
                                                          from_2d, to_2d)
@@ -2030,8 +2213,12 @@ class SlabReinforcement():
                                 top: LayerConfig,
                                 inward: float,
                                 from_2d: tuple,
-                                to_2d: tuple):
-        """Offener U-Randbügel entlang einer Konturkante."""
+                                to_2d: tuple,
+                                spacing: float | None = None,
+                                allplan_layer: int | None = None):
+        """Offener U-Randbügel entlang einer Kante — Plattenrand oder
+        Aussparungsrand, je nach übergebener Verlegelinie und Innenrichtung.
+        """
 
         diameter = bottom.diameter
 
@@ -2068,10 +2255,13 @@ class SlabReinforcement():
             self._next_position(), shape,
             self._pnt(from_2d[0], from_2d[1], bottom.z_axis),
             self._pnt(to_2d[0], to_2d[1], bottom.z_axis),
-            0.0, 0.0, bottom.spacing)
+            0.0, 0.0, spacing if spacing else bottom.spacing)
 
-        layer_id = self.build_ele.LayerStirrupX.value if bottom.direction == 'X' \
-            else self.build_ele.LayerStirrupY.value
+        if allplan_layer is not None:
+            layer_id = allplan_layer
+        else:
+            layer_id = self.build_ele.LayerStirrupX.value if bottom.direction == 'X' \
+                else self.build_ele.LayerStirrupY.value
 
         self._set_placement_layer(placement, layer_id)
 

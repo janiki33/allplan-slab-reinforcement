@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.5.1</Version>
+    <Version>0.5.2</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -501,6 +501,29 @@
         </Parameters>
       </Parameter>
       <Parameter>
+        <Name>OpeningStirrupExpander</Name>
+        <Text>Randbügel Aussparung</Text>
+        <ValueType>Expander</ValueType>
+        <Visible>OpeningMode != "Keine"</Visible>
+        <Parameters>
+          <Parameter>
+            <Name>OpeningStirrupStyle</Name>
+            <Text>Ausbildung</Text>
+            <Value>Einzeln</Value>
+            <ValueList>Einzeln|Am Eisen angebogen|Keine</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>OpeningStirrupSpacing</Name>
+            <Text>Bügelabstand</Text>
+            <Value>150</Value>
+            <MinValue>25</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>OpeningStirrupStyle == "Einzeln"</Visible>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
         <Name>DiagonalExpander</Name>
         <Text>Diagonalzulagen an den Ecken</Text>
         <ValueType>Expander</ValueType>
@@ -647,6 +670,24 @@
             <Name>LayerTopY</Name>
             <Text>Layer obere Lage Y</Text>
             <Value>7582</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerOpeningEdge</Name>
+            <Text>Layer Randzulagen Aussparung</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerOpeningDiagonal</Name>
+            <Text>Layer Diagonalzulagen Aussparung</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerOpeningStirrup</Name>
+            <Text>Layer Randbügel Aussparung</Text>
+            <Value>0</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>

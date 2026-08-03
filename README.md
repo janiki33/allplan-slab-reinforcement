@@ -444,6 +444,18 @@ Eine polygonale Aussparung im Rechteckmodus schaltet die Platte intern auf
 den Konturpfad um — die Bandlogik des Rechteckmodus kennt nur
 achsparallele Rechtecke, der Scanline-Pfad beliebige Polygone.
 
+**Aussparungen als eigene Elemente:** In Allplan ist eine Aussparung in
+einer Decke kein Teil von deren Konturpolygon, sondern ein **Kindelement**.
+Im Elementmodus liest das Tool sie deshalb zusätzlich über
+`BaseElementAdapterChildElementsService.GetChildModelElements`
+([2026-API-Referenz](https://pythonparts.allplan.com/2026/api_reference/InterfaceStubs/NemAll_Python_IFW_ElementAdapter/BaseElementAdapterChildElementsService/))
+— die Aussparungen müssen also **nicht einzeln angetippt** werden.
+Gefiltert wird bewusst **nicht** über eine Typ-UUID: welche Konstante die
+Aussparung bezeichnet, liess sich in der Dokumentation **nicht belegen**.
+Statt zu raten, wird jedes Kindelement genommen, aus dem sich eine
+geschlossene Kontur lesen lässt, die vollständig innerhalb der
+Plattenkontur liegt und kleiner ist als diese.
+
 ### Bewehrung um die Aussparung
 
 Beides läuft über `opening_reinforcement.py` und funktioniert für
@@ -462,6 +474,23 @@ Jeder Zulagestab wird anschliessend an der Plattenkontur **und an allen
 anderen Aussparungen** abgeschnitten, mit derselben Deckungsregel wie die
 Hauptlagen (senkrecht zur geschnittenen Kante, an Schrägen `c / sin α`).
 Reststücke unter der Mindeststablänge entfallen.
+
+- **Randbügel** (`OpeningStirrupStyle`), wie am Plattenrand mit derselben
+  Auswahl:
+  - *Einzeln* — separate offene U-Bügel entlang jeder Aussparungskante, im
+    eingestellten Abstand, Schenkel von der Öffnung weg in den Beton
+  - *Am Eisen angebogen* — kein eigener Bügel; stattdessen bekommen die
+    Lagenstäbe, die an der Aussparung enden, den vollen U-Bügel angebogen
+    (dieselbe Freiform wie am Plattenrand)
+  - *Keine*
+
+Plattenrand und Aussparungsrand haben dafür **getrennte** Optionen
+(`StirrupStyle` bzw. `OpeningStirrupStyle`) — am Rand einzeln und an der
+Aussparung angebogen (oder umgekehrt) ist damit möglich.
+
+Alle drei Zulagearten haben einen eigenen Allplan-Layer:
+`LayerOpeningEdge`, `LayerOpeningDiagonal`, `LayerOpeningStirrup`
+(0 = aktueller Layer), auf der Seite *Allgemein*.
 
 Die Höhenlage: Zulagen liegen **innerhalb** der Hauptlagen — unten
 oberhalb der inneren unteren Lage, oben unterhalb der inneren oberen Lage.
