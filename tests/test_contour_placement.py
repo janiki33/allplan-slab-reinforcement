@@ -7,10 +7,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScripts' / 'SlabReinforcement'))
 
-from contour_placement import (compute_contour_bars, edge_setback,
-                               group_bars_into_runs, group_bars_into_steps,
-                               loop_area, loop_bbox, scan_positions,
-                               split_closed_loops)
+from contour_placement import (_round_outward, bar_parallel_breaks,
+                               compute_contour_bars, decompose_into_zones,
+                               edge_setback, group_bars_into_runs,
+                               group_bars_into_steps, loop_area, loop_bbox,
+                               scan_positions, split_closed_loops)
 
 RECT = [(0, 0), (5000, 0), (5000, 4000), (0, 4000)]
 
@@ -277,6 +278,100 @@ class GroupBarsIntoStepsTest(unittest.TestCase):
         # Bereiche mit 1 und mit 2 Segmenten dürfen nie in derselben Stufe liegen
         self.assertGreaterEqual(len(steps), 3)
         self.assertTrue(any(len(step.segments) == 2 for step in steps))
+
+
+class DecompositionTest(unittest.TestCase):
+    """Schritt 1: Zerlegung in Rechtecke, ausgerichtet nach der Stabrichtung."""
+
+    # Treppenkontur mit Schräge unten rechts (wie die Beispielplatte)
+    SLAB = [(0, 0), (6748, 0), (10214, 5131), (10214, 9240), (6748, 9240),
+            (6748, 6798), (3416, 6798), (3416, 3135), (2095, 3135),
+            (2095, 5131), (0, 5131)]
+
+    def _zones(self, run_axis, deviation=250.0):
+        bars = compute_contour_bars(self.SLAB, [], run_axis, 150.0, 40.0, 300.0,
+                                    max_setback=150.0, dist_margin=46.0)
+        return bars, decompose_into_zones(self.SLAB and bars, self.SLAB, run_axis,
+                                          deviation, 50.0, 300.0)
+
+    def test_breaks_follow_the_bar_direction(self):
+        # Stäbe in Y -> Sprünge an den senkrechten Kanten (x-Werte)
+        self.assertEqual(bar_parallel_breaks(self.SLAB, 1),
+                         [0, 2095, 3416, 6748, 10214])
+
+        # Stäbe in X -> Sprünge an den waagrechten Kanten (y-Werte)
+        self.assertEqual(bar_parallel_breaks(self.SLAB, 0),
+                         [0, 3135, 5131, 6798, 9240])
+
+    def test_rectangles_differ_per_layer(self):
+        _, zones_y = self._zones(1)
+        _, zones_x = self._zones(0)
+
+        rects_y = [z for z in zones_y if z.kind == 'rect']
+        rects_x = [z for z in zones_x if z.kind == 'rect']
+
+        self.assertEqual(len(rects_y), 4)
+        self.assertEqual(len(rects_x), 4)
+        self.assertNotEqual([z.segments[0] for z in rects_y],
+                            [z.segments[0] for z in rects_x])
+
+    def test_rectangle_bars_all_have_the_same_length(self):
+        _, zones = self._zones(1)
+
+        for zone in [z for z in zones if z.kind == 'rect']:
+            self.assertEqual(len(set(zone.segments)), 1)
+
+    def test_slanted_part_becomes_step_zones(self):
+        _, zones = self._zones(1)
+
+        steps = [z for z in zones if z.kind == 'step']
+
+        self.assertGreater(len(steps), 1)
+        # Stufen werden zur Schräge hin kürzer
+        lengths = [z.segments[0][0][1] - z.segments[0][0][0] for z in steps]
+        self.assertGreater(lengths[0], lengths[-1])
+
+    def test_step_is_measured_on_the_longest_bar(self):
+        bars, zones = self._zones(1)
+
+        # Die Stufenzone deckt hier den Bereich unterhalb des Rechtecks ab;
+        # ihr unteres Ende muss dem *längsten* (am tiefsten reichenden) Stab
+        # der Stufe folgen, nicht dem kürzesten.
+        available = {bar.position: bar.segments[0][0] for bar in bars}
+
+        for zone in [z for z in zones if z.kind == 'step']:
+            built_from = zone.segments[0][0][0]
+            own = [available[p] for p in zone.positions if p in available]
+
+            if not own:
+                continue
+
+            self.assertLessEqual(built_from, min(own) + 1e-6)
+            # und nicht am kürzesten Stab abgeschnitten
+            self.assertLess(built_from, max(own) + 1e-6)
+
+    def test_overshoot_stays_within_the_allowance(self):
+        deviation = 250.0
+        bars, zones = self._zones(1, deviation)
+
+        available = {bar.position: bar.segments for bar in bars}
+        raster = 50.0
+
+        for zone in [z for z in zones if z.kind == 'step']:
+            built = zone.segments[0][0]
+
+            for position in zone.positions:
+                for own_from, own_to in available.get(position, ()):
+                    # Stufe darf den Stab verlängern, aber nur begrenzt
+                    # (zusätzlich bis zu einem Raster je Ende durch die Rundung)
+                    overshoot = max(own_from - built[0], 0) + max(built[1] - own_to, 0)
+                    self.assertLessEqual(overshoot, deviation + 2 * raster + 1e-6)
+
+    def test_round_outward_never_shortens(self):
+        self.assertEqual(_round_outward((1050, 1560), 100), (1000, 1600))
+        self.assertEqual(_round_outward((-1560, -1050), 100), (-1600, -1000))
+        self.assertEqual(_round_outward((1000, 1500), 100), (1000, 1500))
+        self.assertEqual(_round_outward((10, 20), 0), (10, 20))
 
 
 if __name__ == '__main__':

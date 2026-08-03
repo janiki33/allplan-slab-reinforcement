@@ -462,3 +462,208 @@ def group_bars_into_runs(bars: list[ContourBar], tol: float = 1.0) -> list[BarRu
         runs.append(BarRun([bar.position], bar.segments))
 
     return runs
+
+
+# ===================================================================
+# Rechteck-Zerlegung (Verlegekonzept in drei Schritten)
+#
+# Schritt 1: Die Kontur wird in achsparallele Rechtecke zerlegt. Getrennt
+#            wird dort, wo die Kontur eine zur Stabrichtung parallele Kante
+#            hat — dort springt die Stablänge.
+# Schritt 2: Je Rechteck EINE gemeinsame Stosslage (nicht je Stab).
+# Schritt 3: Je Rechteck eine Verlegung; Abtreppung und Stösse zerteilen sie.
+#
+# Schräge Ränder erzeugen zusätzlich eine Abtreppungszone: der über alle
+# Stäbe gemeinsame Teil bleibt Rechteck, der veränderliche Teil wird
+# abgetreppt.
+# ===================================================================
+
+
+class PlacementZone(NamedTuple):
+    """Ein Verlegebereich.
+
+    kind:      'rect' = Rechteck (alle Stäbe gleich lang)
+               'step' = Abtreppungszone an einer Schräge
+    positions: Scan-Positionen der Stäbe
+    segments:  je Position die Stabsegmente (bei 'rect' für alle gleich)
+    """
+
+    kind: str
+    positions: list[float]
+    segments: list[tuple[Interval, ...]]
+
+    @property
+    def spacing(self) -> float:
+        if len(self.positions) < 2:
+            return 0.0
+        return self.positions[1] - self.positions[0]
+
+
+def bar_parallel_breaks(contour: Loop, run_axis: int, tol: float = 1.0) -> list[float]:
+    """dist-Koordinaten, an denen die Kontur eine zur Stabrichtung parallele
+    Kante besitzt — dort springt die Stablänge, dort trennen die Rechtecke.
+    """
+
+    dist_axis = 1 - run_axis
+
+    breaks = {p1[dist_axis]
+              for i, p1 in enumerate(contour)
+              if abs(p1[dist_axis] - contour[(i + 1) % len(contour)][dist_axis]) <= tol}
+
+    return sorted(breaks)
+
+
+def _split_at_breaks(bars: list[ContourBar], breaks: list[float]) -> list[list[ContourBar]]:
+    """Teilt die Stablinien an den Sprungstellen in Gruppen."""
+
+    groups: list[list[ContourBar]] = []
+    current: list[ContourBar] = []
+    limits = [b for b in breaks]
+
+    for bar in bars:
+        if current:
+            previous = current[-1].position
+            if any(previous < limit <= bar.position for limit in limits):
+                groups.append(current)
+                current = []
+
+        current.append(bar)
+
+    if current:
+        groups.append(current)
+
+    return groups
+
+
+def decompose_into_zones(bars: list[ContourBar],
+                         contour: Loop,
+                         run_axis: int,
+                         max_step_deviation: float,
+                         length_raster: float = 0.0,
+                         min_bar_length: float = 0.0) -> list[PlacementZone]:
+    """Zerlegt die Stablinien in Rechteck- und Abtreppungszonen.
+
+    Je zusammenhängendem Bereich (zwischen zwei Sprungstellen) wird der
+    Teil, den alle Stäbe gemeinsam haben, zu einem Rechteck; was darüber
+    oder darunter hinausragt, wird abgetreppt.
+    """
+
+    zones: list[PlacementZone] = []
+
+    for group in _split_at_breaks(bars, bar_parallel_breaks(contour, run_axis)):
+        if not group:
+            continue
+
+        count = len(group[0].segments)
+
+        if any(len(bar.segments) != count for bar in group):
+            # Öffnung o. ä. innerhalb der Gruppe: konservativ je Stab trennen
+            zones += _steps_from_bars(group, max_step_deviation, length_raster,
+                                      min_bar_length)
+            continue
+
+        # Gemeinsamer Teil aller Stäbe = Rechteck
+        common = tuple((max(bar.segments[i][0] for bar in group),
+                        min(bar.segments[i][1] for bar in group))
+                       for i in range(count))
+
+        rect = tuple(seg for seg in common if seg[1] - seg[0] >= min_bar_length)
+
+        if rect:
+            zones.append(PlacementZone('rect', [bar.position for bar in group],
+                                       [rect] * len(group)))
+
+        # Was über den gemeinsamen Teil hinausragt -> Abtreppung
+        remainder: list[ContourBar] = []
+
+        for bar in group:
+            extra: list[Interval] = []
+
+            for i, (seg_from, seg_to) in enumerate(bar.segments):
+                below = (seg_from, common[i][0])
+                above = (common[i][1], seg_to)
+
+                extra += [seg for seg in (below, above)
+                          if seg[1] - seg[0] >= min_bar_length]
+
+            if extra:
+                remainder.append(ContourBar(bar.position, tuple(extra)))
+
+        if remainder:
+            zones += _steps_from_bars(remainder, max_step_deviation,
+                                      length_raster, min_bar_length)
+
+    return zones
+
+
+def _steps_from_bars(bars: list[ContourBar],
+                     max_step_deviation: float,
+                     length_raster: float,
+                     min_bar_length: float,
+                     tol: float = 1.0) -> list[PlacementZone]:
+    """Abtreppung: Stäbe werden zu Stufen gruppiert und **am längsten Stab
+    der Stufe** vermessen (nicht am kürzesten).
+
+    Eine Stufe wächst, solange kein Stab dadurch mehr als
+    max_step_deviation über seine eigene geometrische Länge hinausragt.
+    """
+
+    def enclosing(group: list[ContourBar]) -> tuple[Interval, ...]:
+        count = len(group[0].segments)
+        return tuple((min(bar.segments[i][0] for bar in group),
+                      max(bar.segments[i][1] for bar in group))
+                     for i in range(count))
+
+    def worst_overshoot(group: list[ContourBar], unified: tuple[Interval, ...]) -> float:
+        return max((bar.segments[i][0] - unified[i][0]) +
+                   (unified[i][1] - bar.segments[i][1])
+                   for bar in group for i in range(len(unified)))
+
+    zones: list[PlacementZone] = []
+    group: list[ContourBar] = []
+
+    def flush():
+        if not group:
+            return
+
+        unified = enclosing(group)
+
+        if length_raster > 0:
+            unified = tuple(_round_outward(seg, length_raster) for seg in unified)
+
+        unified = tuple(seg for seg in unified if seg[1] - seg[0] >= min_bar_length)
+
+        if unified:
+            zones.append(PlacementZone('step', [bar.position for bar in group],
+                                       [unified] * len(group)))
+
+    for bar in bars:
+        if group:
+            same_shape = len(bar.segments) == len(group[0].segments)
+            gap = bar.position - group[-1].position
+            same_gap = len(group) < 2 or abs(gap - (group[1].position - group[0].position)) <= tol
+
+            if same_shape and same_gap and \
+                    worst_overshoot(group + [bar], enclosing(group + [bar])) <= max_step_deviation:
+                group.append(bar)
+                continue
+
+            flush()
+
+        group = [bar]
+
+    flush()
+
+    return zones
+
+
+def _round_outward(seg: Interval, raster: float) -> Interval:
+    """Rundet ein Segment auf das Raster — beide Enden nach aussen, passend
+    zur Vermessung am längsten Stab der Stufe.
+    """
+
+    if raster <= 0:
+        return seg
+
+    return (math.floor(seg[0] / raster + 1e-9) * raster,
+            math.ceil(seg[1] / raster - 1e-9) * raster)
