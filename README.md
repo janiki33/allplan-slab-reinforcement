@@ -278,6 +278,29 @@ Dokument trägt den Vermerk „keine Gültigkeit") und aus der **Richtlinie zur
 Betonstahlverarbeitung, 1. Auflage 2025 (SSHV/SIA)**. Vor produktivem
 Einsatz an der gekauften Endfassung gegenprüfen.
 
+### 0. Verlegekonzept in drei Schritten
+
+Die Verlegung entsteht nicht Stab für Stab, sondern über Bereiche:
+
+1. **Rechtecke bilden.** Die Kontur wird in achsparallele Rechtecke
+   zerlegt. Getrennt wird dort, wo die Kontur eine Kante **parallel zur
+   Stabrichtung** hat — deshalb sind die Rechtecke je Lage anders
+   ausgerichtet (X-Lage bricht an waagrechten, Y-Lage an senkrechten
+   Kanten). Ein schräger Rand lässt den allen Stäben gemeinsamen Teil als
+   Rechteck stehen; der veränderliche Rest wird zur Abtreppungszone. Über
+   den Palettenwert **Rechteckgrenze** ist wählbar, ob das Rechteck an der
+   nächsten Konturkante endet (Rechtecke fluchten über die Bänder hinweg)
+   oder erst am Beginn der Schräge.
+2. **Stosslage.** Wo zwei Verlegungen längs aneinanderstossen — typisch
+   Rechteck und angrenzende Abtreppung — überlappen sie sich um die
+   Übergreifungslänge, unabhängig von der Stablänge. Verlängert wird die
+   Abtreppungszone in das Rechteck hinein, sodass die Rechteckgrenze die
+   Stosslage definiert.
+3. **Verlegungen.** Je Zone eine Verlegung. Ist ein Stab danach immer noch
+   länger als die zulässige Stablänge, wird er zusätzlich gestossen.
+   Verlegungen mit nur einem Stab entstehen nicht: Ein einzelner Stab wird
+   der Nachbarverlegung zugeschlagen, die dafür verlängert wird.
+
 ### 1. Stösse — wann
 
 Gestossen wird, sobald die erforderliche Stablänge die einstellbare
@@ -298,20 +321,16 @@ ausdrücklich verlangt („In der Regel gilt es, die Anzahl Positionen zu
 minimieren", Ziff. 4.1.1) und wofür je Position ein fixer Betrag
 verrechnet wird (Ziff. 7.1).
 
-### 3. Stösse — wo, und der Versatz
+### 3. Stösse — wo
 
-**Normativ (prSIA 262, Ziff. 5.2.6.6):** Bei Zugstäben muss für
-1.2 σ_sd statt 1.0 σ_sd bemessen werden — **ausser** wenn bei **Platten
-höchstens die Hälfte der Stäbe** gestossen ist **und** der Abstand
-zwischen verschiedenen Übergreifungsstössen **mindestens 0.3 · l_sd**
-beträgt. Genau das setzt das Tool um:
-
-- Ein Verlegelauf wird in **gerade und ungerade Stäbe** aufgeteilt (zwei
-  Placements mit doppeltem Stababstand). Damit ist in jedem Schnitt
-  höchstens die Hälfte der Stäbe gestossen.
-- Beide Gruppen erhalten gegenläufig verschobene Stosslagen; der
-  Längsversatz ist **`StaggerFactor` × Übergreifungslänge**, Default
-  **0.3** entsprechend der Norm.
+**Kein automatischer Stossversatz.** SIA 262 Ziff. 5.2.6.6 verlangt für
+Platten, dass höchstens die Hälfte der Stäbe im selben Schnitt gestossen
+ist und benachbarte Stösse mindestens 0.3 · l_sd auseinanderliegen. Das
+Tool setzt das **nicht** automatisch um: Ein automatischer Versatz müsste
+jeden Verlegelauf in gerade und ungerade Stäbe aufteilen, was zwei
+ineinandergeschobene Verlegungen je Bereich ergibt — auf Wunsch des
+Anwenders bewusst entfernt. **Der Versatz ist damit eine Prüfaufgabe der
+Tragwerksplanung.**
 
 **Ebenfalls normativ (Ziff. 5.2.6.3):** *„Stossverbindungen sind nach
 Möglichkeit in Zonen geringer Beanspruchung anzuordnen."* Da du Wände und
@@ -350,16 +369,17 @@ prSIA 262 und in der Verarbeitungsrichtlinie). Das Tool verwendet daher
 eine klar definierte, konfigurierbare **Bürostandard-Regel**:
 
 > Aufeinanderfolgende Stäbe bilden eine Stufe, solange **kein Stab der
-> Stufe dadurch mehr als `StepMaxLoss` kürzer wird**, als er geometrisch
-> sein könnte (Default 250 mm). Alle Stäbe einer Stufe erhalten dieselbe
-> Länge: Anfang = grösster Anfang, Ende = kleinstes Ende der Stufe.
+> Stufe dadurch mehr als `StepMaxLoss` über seine geometrische Länge
+> hinausragt** (Default 250 mm). Alle Stäbe einer Stufe erhalten dieselbe
+> Länge, vermessen am **längsten** Stab der Stufe: Anfang = kleinster
+> Anfang, Ende = grösstes Ende.
 
 Daraus folgt unmittelbar:
 
-- Kein Stab ragt je über die Betonkante hinaus (es wird immer das
-  ungünstigste Ende der Stufe verwendet, und das Längenraster
-  `StepLengthRaster`, Default 50 mm, rundet **nach innen**).
-- Die unbewehrte Zone an der Schräge ist durch `StepMaxLoss` begrenzt.
+- Die Stäbe folgen der Schräge so eng wie möglich; das Längenraster
+  `StepLengthRaster` (Default 50 mm) rundet passend **nach aussen**.
+- Der Überstand über die theoretische Kontur ist durch `StepMaxLoss`
+  begrenzt (zuzüglich bis zu einem Raster je Ende).
 - Ein grösserer Wert ergibt weniger, dafür gröbere Stufen — bei 45° und
   15 cm Stababstand liefert der Default 2 Stäbe je Stufe und 30 cm
   Längensprung.

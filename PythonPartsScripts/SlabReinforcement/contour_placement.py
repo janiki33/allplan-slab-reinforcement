@@ -740,3 +740,49 @@ def _round_outward(seg: Interval, raster: float) -> Interval:
 
     return (math.floor(seg[0] / raster + 1e-9) * raster,
             math.ceil(seg[1] / raster - 1e-9) * raster)
+
+
+def apply_boundary_laps(zones: list[PlacementZone],
+                        lap_length: float,
+                        tol: float = 60.0) -> list[PlacementZone]:
+    """Schritt 2: Übergreifung an jeder Verlegungsgrenze längs der Stäbe.
+
+    Wo zwei Verlegungen in Stabrichtung aneinanderstossen (typisch Rechteck
+    und angrenzende Abtreppungszone), müssen sie sich um die
+    Übergreifungslänge überlappen — sonst wäre der Stab dort nur gestossen
+    ohne Übergreifung. Verlängert wird die **Abtreppungszone** in das
+    Rechteck hinein; das Rechteck bleibt unverändert, damit die
+    Rechteckgrenze die Stosslage definiert.
+    """
+
+    if lap_length <= 0:
+        return zones
+
+    rects = [z for z in zones if z.kind == 'rect']
+    result: list[PlacementZone] = []
+
+    for zone in zones:
+        if zone.kind != 'step':
+            result.append(zone)
+            continue
+
+        segments = list(zone.segments[0])
+
+        for rect in rects:
+            # nur Rechtecke, die dieselben Stäbe tragen
+            if rect.positions[-1] < zone.positions[0] - tol or \
+                    rect.positions[0] > zone.positions[-1] + tol:
+                continue
+
+            for r_lo, r_hi in rect.segments[0]:
+                for index, (s_lo, s_hi) in enumerate(segments):
+                    if abs(s_hi - r_lo) <= tol:          # Stufe endet am Rechteck
+                        segments[index] = (s_lo, r_lo + lap_length)
+                    elif abs(s_lo - r_hi) <= tol:        # Stufe beginnt am Rechteck
+                        segments[index] = (r_hi - lap_length, s_hi)
+
+        unified = tuple(segments)
+        result.append(PlacementZone(zone.kind, zone.positions,
+                                    [unified] * len(zone.positions)))
+
+    return result

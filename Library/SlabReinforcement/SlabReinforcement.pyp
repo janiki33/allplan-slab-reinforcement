@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.3.3</Version>
+    <Version>0.4.0</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -366,20 +366,6 @@
             <Value>8000</Value>
             <MinValue>1000</MinValue>
             <ValueType>Length</ValueType>
-          </Parameter>
-          <Parameter>
-            <Name>StaggerLaps</Name>
-            <Text>Stösse versetzen</Text>
-            <Value>True</Value>
-            <ValueType>CheckBox</ValueType>
-          </Parameter>
-          <Parameter>
-            <Name>StaggerFactor</Name>
-            <Text>Versatz (x Übergreifungslänge)</Text>
-            <Value>0.3</Value>
-            <MinValue>0</MinValue>
-            <ValueType>Double</ValueType>
-            <Visible>StaggerLaps</Visible>
           </Parameter>
           <Parameter>
             <Name>LapOpeningMargin</Name>
