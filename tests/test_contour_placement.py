@@ -6,8 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScripts' / 'SlabReinforcement'))
 
-from contour_placement import (compute_contour_bars, group_bars_into_runs, loop_area,
-                               loop_bbox, scan_positions, split_closed_loops)
+from contour_placement import (compute_contour_bars, group_bars_into_runs,
+                               group_bars_into_steps, loop_area, loop_bbox,
+                               scan_positions, split_closed_loops)
 
 RECT = [(0, 0), (5000, 0), (5000, 4000), (0, 4000)]
 
@@ -142,6 +143,90 @@ class GroupBarsIntoRunsTest(unittest.TestCase):
         # Verdichtungszonen und Mittelbereich bilden getrennte Läufe
         self.assertGreaterEqual(len(runs), 3)
         self.assertEqual(runs[0].spacing, 100)
+
+
+class GroupBarsIntoStepsTest(unittest.TestCase):
+    """Abtreppung an schrägen Rändern.
+
+    Testkontur: Rechteck 5000x4000 mit 45°-Schräge von (3000,0) nach (5000,2000).
+    """
+
+    DIAG = [(0, 0), (3000, 0), (5000, 2000), (5000, 4000), (0, 4000)]
+
+    def _bars(self, spacing=150):
+        return compute_contour_bars(self.DIAG, [], 0, spacing, 0, 300)
+
+    def test_rectangle_still_collapses_to_one_run(self):
+        bars = compute_contour_bars(RECT, [], 0, 200, 0, 300)
+        steps = group_bars_into_steps(bars, max_step_loss=250, length_raster=50)
+
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(len(steps[0].positions), len(bars))
+
+    def test_no_bar_is_shortened_more_than_allowed(self):
+        bars = self._bars()
+        max_loss = 250
+
+        steps = group_bars_into_steps(bars, max_step_loss=max_loss, length_raster=0)
+
+        available = {bar.position: bar.segments[0] for bar in bars}
+
+        for step in steps:
+            for position in step.positions:
+                own = available[position]
+                built = step.segments[0]
+                loss = abs(built[0] - own[0]) + abs(own[1] - built[1])
+
+                self.assertLessEqual(loss, max_loss)
+
+    def test_bars_never_protrude_beyond_the_contour(self):
+        bars = self._bars()
+        steps = group_bars_into_steps(bars, max_step_loss=500, length_raster=50)
+
+        available = {bar.position: bar.segments[0] for bar in bars}
+
+        for step in steps:
+            for position in step.positions:
+                own_from, own_to = available[position]
+                built_from, built_to = step.segments[0]
+
+                self.assertGreaterEqual(built_from, own_from - 1e-6)
+                self.assertLessEqual(built_to, own_to + 1e-6)
+
+    def test_larger_allowance_creates_fewer_and_wider_steps(self):
+        bars = self._bars()
+
+        few = group_bars_into_steps(bars, max_step_loss=500, length_raster=50)
+        many = group_bars_into_steps(bars, max_step_loss=150, length_raster=50)
+
+        self.assertLess(len(few), len(many))
+        self.assertGreater(len(few[0].positions), len(many[0].positions))
+
+    def test_zero_allowance_means_every_differing_bar_on_its_own(self):
+        bars = self._bars()
+        steps = group_bars_into_steps(bars, max_step_loss=0, length_raster=0)
+
+        stepped = [step for step in steps if step.positions[0] < 2000]
+        self.assertTrue(all(len(step.positions) == 1 for step in stepped))
+
+    def test_length_raster_rounds_inward(self):
+        bars = self._bars()
+        steps = group_bars_into_steps(bars, max_step_loss=250, length_raster=100)
+
+        for step in steps:
+            for seg_from, seg_to in step.segments:
+                self.assertAlmostEqual(seg_from % 100, 0, places=6)
+                self.assertAlmostEqual(seg_to % 100, 0, places=6)
+
+    def test_step_breaks_where_opening_starts(self):
+        opening = [(1000, 1000), (2000, 1000), (2000, 2000), (1000, 2000)]
+        bars = compute_contour_bars(RECT, [opening], 0, 200, 0, 300)
+
+        steps = group_bars_into_steps(bars, max_step_loss=250, length_raster=0)
+
+        # Bereiche mit 1 und mit 2 Segmenten dürfen nie in derselben Stufe liegen
+        self.assertGreaterEqual(len(steps), 3)
+        self.assertTrue(any(len(step.segments) == 2 for step in steps))
 
 
 if __name__ == '__main__':

@@ -61,7 +61,7 @@ from Utils.HandleCreator import HandleCreator
 # "SlabReinforcement" lädt (Namenskollision Modul <-> Ordner).
 # Der Fallback greift, falls das Skript ohne Paketkontext geladen wird.
 try:
-    from .contour_placement import (compute_contour_bars, group_bars_into_runs,
+    from .contour_placement import (compute_contour_bars, group_bars_into_steps,
                                     loop_area, split_closed_loops)
     from .opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
                                    compute_placement_bands)
@@ -71,7 +71,7 @@ except ImportError:
 
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-    from contour_placement import (compute_contour_bars, group_bars_into_runs,
+    from contour_placement import (compute_contour_bars, group_bars_into_steps,
                                    loop_area, split_closed_loops)
     from opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
                                   compute_placement_bands)
@@ -477,6 +477,10 @@ class SlabReinforcement():
         self.edge_zones_active = build_ele.EdgeZonesActive.value
         self.edge_zone_length = build_ele.EdgeZoneLength.value
         self.edge_zone_spacing = build_ele.EdgeZoneSpacing.value
+
+        # Abtreppung an schrägen Rändern
+        self.step_max_loss = build_ele.StepMaxLoss.value
+        self.step_length_raster = build_ele.StepLengthRaster.value
 
         self.position_counter = 0
 
@@ -1215,7 +1219,12 @@ class SlabReinforcement():
 
         placements: list[AllplanReinf.BarPlacement] = []
 
-        for run in group_bars_into_runs(bars):
+        # Abtreppung an schrägen Rändern: Stäbe werden zu Stufen gleicher
+        # Länge gruppiert, solange kein Stab dabei mehr als StepMaxLoss
+        # kürzer wird als geometrisch möglich
+        for run in group_bars_into_steps(bars,
+                                         max_step_loss=self.step_max_loss,
+                                         length_raster=self.step_length_raster):
             for seg_from, seg_to in run.segments:
                 shape = self._create_straight_bar_shape(layer, seg_to - seg_from,
                                                         self.concrete_cover, self.concrete_cover)

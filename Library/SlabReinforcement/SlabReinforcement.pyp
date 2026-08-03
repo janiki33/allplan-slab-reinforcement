@@ -102,6 +102,27 @@
           </Parameter>
         </Parameters>
       </Parameter>
+      <Parameter>
+        <Name>SteppingExpander</Name>
+        <Text>Abtreppung an Schrägen</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>StepMaxLoss</Name>
+            <Text>Max. Verkürzung je Stab</Text>
+            <Value>250</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>StepLengthRaster</Name>
+            <Text>Längenraster</Text>
+            <Value>50</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
     </Parameters>
   </Page>
   <Page>

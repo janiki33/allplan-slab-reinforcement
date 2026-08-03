@@ -13,6 +13,7 @@ Konventionen:
 
 from __future__ import annotations
 
+import math
 from typing import NamedTuple
 
 Point = tuple[float, float]
@@ -237,6 +238,115 @@ class BarRun(NamedTuple):
         if len(self.positions) < 2:
             return 0.0
         return self.positions[1] - self.positions[0]
+
+
+def _round_inward(seg: Interval, raster: float) -> Interval:
+    """Rundet ein Segment auf das Raster — beide Enden nach innen, damit der
+    Stab nie über die Betonkante hinauswächst.
+    """
+
+    if raster <= 0:
+        return seg
+
+    seg_from = math.ceil(seg[0] / raster - 1e-9) * raster
+    seg_to = math.floor(seg[1] / raster + 1e-9) * raster
+
+    return (seg_from, seg_to) if seg_to > seg_from else seg
+
+
+def group_bars_into_steps(bars: list[ContourBar],
+                          max_step_loss: float,
+                          length_raster: float = 0.0,
+                          tol: float = 1.0) -> list[BarRun]:
+    """Fasst Stablinien zu Abtreppungsstufen zusammen.
+
+    Regel (eine einzige, nachvollziehbare Bedingung):
+        Aufeinanderfolgende Stäbe bilden eine Stufe, solange **kein** Stab
+        der Stufe dadurch mehr als `max_step_loss` kürzer wird, als er
+        geometrisch sein könnte. Alle Stäbe einer Stufe bekommen dieselben
+        Segmente: Anfang = größter Anfang, Ende = kleinstes Ende der Stufe.
+        Damit ragt kein Stab über die Betonkante (abzüglich Deckung) hinaus,
+        und die unbewehrte Zone an der Schräge ist durch max_step_loss
+        begrenzt.
+
+    Zusätzlich bricht eine Stufe ab, wenn sich die Segmentanzahl ändert
+    (z. B. am Beginn einer Öffnung) oder der Stababstand wechselt.
+
+    Bei einer rechtwinkligen Platte sind alle Stäbe gleich lang, der Verlust
+    ist immer 0 — es entsteht genau ein Lauf über die gesamte Lage.
+
+    Args:
+        bars:           Stablinien aus compute_contour_bars
+        max_step_loss:  zulässige Verkürzung je Stab [mm]; 0 = keine
+                        Abtreppung (jeder abweichende Stab einzeln)
+        length_raster:  Stablängen zusätzlich auf dieses Raster nach innen
+                        runden (0 = aus)
+        tol:            Toleranz für "gleich"
+
+    Returns:
+        Liste der Stufen als BarRun (Positionen + gemeinsame Segmente)
+    """
+
+    def unify(group: list[ContourBar]) -> tuple[Interval, ...]:
+        return tuple((max(bar.segments[i][0] for bar in group),
+                      min(bar.segments[i][1] for bar in group))
+                     for i in range(len(group[0].segments)))
+
+    def worst_loss(group: list[ContourBar], unified: tuple[Interval, ...]) -> float:
+        return max(abs(bar.segments[i][0] - unified[i][0]) +
+                   abs(bar.segments[i][1] - unified[i][1])
+                   for bar in group for i in range(len(unified)))
+
+    steps: list[BarRun] = []
+    group: list[ContourBar] = []
+
+    def flush():
+        if not group:
+            return
+
+        unified = unify(group)
+
+        if length_raster > 0:
+            unified = tuple(_round_inward(seg, length_raster) for seg in unified)
+
+        steps.append(BarRun([bar.position for bar in group], unified))
+
+    for bar in bars:
+        if group:
+            same_shape = len(bar.segments) == len(group[0].segments)
+            gap = bar.position - group[-1].position
+            same_gap = len(group) < 2 or abs(gap - (group[1].position - group[0].position)) <= tol
+
+            if same_shape and same_gap and worst_loss(group + [bar], unify(group + [bar])) <= max_step_loss:
+                group.append(bar)
+                continue
+
+            flush()
+
+        group = [bar]
+
+    flush()
+
+    # Stufen mit identischen Segmenten und gleichem Abstand wieder
+    # zusammenfassen (Rechteckbereiche ergeben so einen einzigen Lauf)
+    merged: list[BarRun] = []
+
+    for step in steps:
+        if merged:
+            previous = merged[-1]
+            gap = step.positions[0] - previous.positions[-1]
+            gaps_ok = (len(previous.positions) < 2 or abs(gap - previous.spacing) <= tol) and \
+                      (len(step.positions) < 2 or abs(gap - step.spacing) <= tol)
+
+            if gaps_ok and len(previous.segments) == len(step.segments) and \
+                    all(abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
+                        for a, b in zip(previous.segments, step.segments)):
+                previous.positions.extend(step.positions)
+                continue
+
+        merged.append(step)
+
+    return merged
 
 
 def group_bars_into_runs(bars: list[ContourBar], tol: float = 1.0) -> list[BarRun]:
