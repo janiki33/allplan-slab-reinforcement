@@ -157,6 +157,10 @@ class SlabReinforcementScript(BaseScriptObject):
         self.z_offset = 0.0
         self.thickness_override: float | None = None
 
+        # Solange False, liefert execute() ein leeres Ergebnis — sonst würde
+        # während der Eingabe bereits eine Platte am Nullpunkt erscheinen
+        self.input_finished = False
+
 
     def start_input(self):
         """Ersteingabe je nach gewähltem Eingabemodus starten."""
@@ -164,6 +168,14 @@ class SlabReinforcementScript(BaseScriptObject):
         build_ele = self.build_ele
 
         build_ele.InputMode.value = build_ele.INPUT_MODE_INPUT
+
+        # Ergebnisse einer vorherigen Eingabe verwerfen (Moduswechsel)
+        self.input_finished = False
+        self.contour = None
+        self.openings = []
+        self.z_offset = 0.0
+        self.thickness_override = None
+        self.placement_pnt = AllplanGeo.Point3D()
 
         input_method = build_ele.InputMethod.value
 
@@ -210,6 +222,7 @@ class SlabReinforcementScript(BaseScriptObject):
         build_ele.InputMode.value = build_ele.INPUT_MODE_CREATION
 
         self.script_object_interactor = None
+        self.input_finished = True
 
         print(f'SlabReinforcement: Eingabe abgeschlossen — '
               f'Kontur: {"ja" if self.contour else "nein (Rechteck)"}, '
@@ -217,7 +230,16 @@ class SlabReinforcementScript(BaseScriptObject):
 
 
     def execute(self) -> CreateElementResult:
-        """Elemente erzeugen (wird auch bei Parameteränderung erneut gerufen)."""
+        """Elemente erzeugen (wird auch bei Parameteränderung erneut gerufen).
+
+        Vor abgeschlossener Eingabe bleibt das Ergebnis leer: Im Polygon-
+        und Elementmodus gibt es dann noch keine Kontur, im Rechteckmodus
+        noch keinen Absetzpunkt — sonst würde Allplan eine Platte in
+        Default-Größe am Nullpunkt zeichnen.
+        """
+
+        if not self.input_finished:
+            return CreateElementResult()
 
         engine = SlabReinforcement(self.build_ele, self.document,
                                    contour=self.contour,
