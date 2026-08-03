@@ -121,6 +121,13 @@
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
           </Parameter>
+          <Parameter>
+            <Name>MaxEdgeSetback</Name>
+            <Text>Max. Rückversatz an spitzen Winkeln</Text>
+            <Value>150</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
+          </Parameter>
         </Parameters>
       </Parameter>
     </Parameters>
@@ -287,20 +294,6 @@
     <Text>Seiten</Text>
     <Parameters>
       <Parameter>
-        <Name>OverlapExpander</Name>
-        <Text>Stoß</Text>
-        <ValueType>Expander</ValueType>
-        <Parameters>
-          <Parameter>
-            <Name>OverlapFactor</Name>
-            <Text>Stoßlänge (x ø)</Text>
-            <Value>50</Value>
-            <MinValue>1</MinValue>
-            <ValueType>Integer</ValueType>
-          </Parameter>
-        </Parameters>
-      </Parameter>
-      <Parameter>
         <Name>SidesExpander</Name>
         <Text>Randausbildung je Kante</Text>
         <ValueType>Expander</ValueType>
@@ -332,6 +325,61 @@
             <Value>Keine</Value>
             <ValueList>Randbügel|Anschlusseisen|Separate Anschlusseisen|Keine</ValueList>
             <ValueType>StringComboBox</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+    </Parameters>
+  </Page>
+  <Page>
+    <Name>LapPage</Name>
+    <Text>Stösse</Text>
+    <Parameters>
+      <Parameter>
+        <Name>LapLengthExpander</Name>
+        <Text>Übergreifungslänge</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>OverlapFactor</Name>
+            <Text>Übergreifungslänge (x ø)</Text>
+            <Value>50</Value>
+            <MinValue>1</MinValue>
+            <ValueType>Integer</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
+        <Name>LapExpander</Name>
+        <Text>Automatische Stösse</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>MaxBarLength</Name>
+            <Text>Max. Stablänge</Text>
+            <Value>8000</Value>
+            <MinValue>1000</MinValue>
+            <ValueType>Length</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>StaggerLaps</Name>
+            <Text>Stösse versetzen</Text>
+            <Value>True</Value>
+            <ValueType>CheckBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>StaggerFactor</Name>
+            <Text>Versatz (x Übergreifungslänge)</Text>
+            <Value>0.3</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Double</ValueType>
+            <Visible>StaggerLaps</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>LapOpeningMargin</Name>
+            <Text>Abstand Stoss zu Öffnung</Text>
+            <Value>500</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
           </Parameter>
         </Parameters>
       </Parameter>

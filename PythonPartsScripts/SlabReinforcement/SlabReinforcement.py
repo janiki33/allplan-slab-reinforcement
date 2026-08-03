@@ -62,7 +62,8 @@ from Utils.HandleCreator import HandleCreator
 # Der Fallback greift, falls das Skript ohne Paketkontext geladen wird.
 try:
     from .contour_placement import (compute_contour_bars, group_bars_into_steps,
-                                    loop_area, split_closed_loops)
+                                    loop_area, loop_bbox, split_closed_loops)
+    from .lap_splitting import split_with_preferred_joints, stagger_shift
     from .opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
                                    compute_placement_bands)
 except ImportError:
@@ -72,7 +73,8 @@ except ImportError:
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
     from contour_placement import (compute_contour_bars, group_bars_into_steps,
-                                   loop_area, split_closed_loops)
+                                   loop_area, loop_bbox, split_closed_loops)
+    from lap_splitting import split_with_preferred_joints, stagger_shift
     from opening_clipping import (compute_edge_bar_runs, compute_edge_strip_segments,
                                   compute_placement_bands)
 
@@ -481,6 +483,13 @@ class SlabReinforcement():
         # Abtreppung an schrägen Rändern
         self.step_max_loss = build_ele.StepMaxLoss.value
         self.step_length_raster = build_ele.StepLengthRaster.value
+        self.max_edge_setback = build_ele.MaxEdgeSetback.value
+
+        # Stösse
+        self.max_bar_length = build_ele.MaxBarLength.value
+        self.stagger_active = build_ele.StaggerLaps.value
+        self.stagger_factor = build_ele.StaggerFactor.value
+        self.lap_opening_margin = build_ele.LapOpeningMargin.value
 
         self.position_counter = 0
 
@@ -861,18 +870,23 @@ class SlabReinforcement():
                 cover_start = 0.0 if ae_start else self.concrete_cover
                 cover_end = 0.0 if ae_end else self.concrete_cover
 
-                shape = self._create_straight_bar_shape(layer,
-                                                        run_to - run_from + ae_start + ae_end,
-                                                        cover_start, cover_end)
+                # Nettospanne des Stabes (Deckung bzw. Anschlusseisen-Überstand
+                # bereits berücksichtigt) — Grundlage für die Stossteilung
+                net_from = run_from - ae_start + cover_start
+                net_to = run_to + ae_end - cover_end
 
-                run_origin = run_from - ae_start
+                # Sperrzone für Stossfugen rund um die Öffnung
+                zones = []
+                if self.has_opening and self.lap_opening_margin > 0:
+                    zones = [(opening_run[0] - self.lap_opening_margin,
+                              opening_run[1] + self.lap_opening_margin)]
 
                 if layer.direction == 'X':
-                    from_pnt = self._pnt(run_origin, band.dist_from, layer.z_axis)
-                    to_pnt = self._pnt(run_origin, band.dist_to, layer.z_axis)
+                    from_pnt = self._pnt(0, band.dist_from, layer.z_axis)
+                    to_pnt = self._pnt(0, band.dist_to, layer.z_axis)
                 else:
-                    from_pnt = self._pnt(band.dist_from, run_origin, layer.z_axis)
-                    to_pnt = self._pnt(band.dist_to, run_origin, layer.z_axis)
+                    from_pnt = self._pnt(band.dist_from, 0, layer.z_axis)
+                    to_pnt = self._pnt(band.dist_to, 0, layer.z_axis)
 
                 # Verteil-Deckung nur an echten Plattenrändern, nicht an
                 # Bandgrenzen mitten in der Platte
@@ -892,17 +906,29 @@ class SlabReinforcement():
                                 place_cover_from, place_cover_to)]
 
                 for region_from, region_to, spacing, region_cover_from, region_cover_to in regions:
-                    placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
-                        self._next_position(),
-                        AllplanReinf.BendingShape(shape),
-                        region_from,
-                        region_to,
-                        region_cover_from,
-                        region_cover_to,
-                        spacing)
+                    for sub_spacing, sub_cover_from, shift in self._stagger_regions(
+                            spacing, region_cover_from, layer):
+                        for piece_from, piece_to in self._lap_pieces((net_from, net_to),
+                                                                     layer, shift, zones):
+                            piece_shape = self._create_straight_bar_shape(
+                                layer, piece_to - piece_from, 0.0, 0.0)
 
-                    self._set_placement_layer(placement, layer.allplan_layer)
-                    placements.append(placement)
+                            if layer.direction == 'X':
+                                offset = AllplanGeo.Point3D(piece_from, 0, 0)
+                            else:
+                                offset = AllplanGeo.Point3D(0, piece_from, 0)
+
+                            placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                                self._next_position(),
+                                piece_shape,
+                                region_from + offset,
+                                region_to + offset,
+                                sub_cover_from,
+                                region_cover_to,
+                                sub_spacing)
+
+                            self._set_placement_layer(placement, layer.allplan_layer)
+                            placements.append(placement)
 
         layer.placements = placements
 
@@ -1211,11 +1237,14 @@ class SlabReinforcement():
 
         min_bar_length = max(self.build_ele.MinBarLength.value, 10.0)
 
+        # Die zurückgegebenen Segmente sind bereits Nettomasse: die
+        # Betondeckung ist senkrecht zur jeweiligen Kante abgezogen
         bars = compute_contour_bars(
             self.contour, self.contour_openings, run_axis,
             layer.spacing, self.concrete_cover, min_bar_length,
             edge_zone_length=self.edge_zone_length if self.edge_zones_active else 0.0,
-            edge_zone_spacing=self.edge_zone_spacing if self.edge_zones_active else 0.0)
+            edge_zone_spacing=self.edge_zone_spacing if self.edge_zones_active else 0.0,
+            max_setback=self.max_edge_setback)
 
         placements: list[AllplanReinf.BarPlacement] = []
 
@@ -1225,52 +1254,152 @@ class SlabReinforcement():
         for run in group_bars_into_steps(bars,
                                          max_step_loss=self.step_max_loss,
                                          length_raster=self.step_length_raster):
-            for seg_from, seg_to in run.segments:
-                shape = self._create_straight_bar_shape(layer, seg_to - seg_from,
-                                                        self.concrete_cover, self.concrete_cover)
+            for segment in run.segments:
+                zones = self._lap_forbidden_zones(run_axis, run.positions)
 
-                first, last = run.positions[0], run.positions[-1]
-
-                if len(run.positions) == 1:
-                    # Einzelstab: halben Lagenabstand als Verlegefenster,
-                    # der Stab landet mittig exakt auf der Scan-Position
-                    window = layer.spacing / 2.0
-
-                    if run_axis == 0:
-                        from_pnt = self._pnt(seg_from, first - window, layer.z_axis)
-                        to_pnt = self._pnt(seg_from, first + window, layer.z_axis)
-                    else:
-                        from_pnt = self._pnt(first - window, seg_from, layer.z_axis)
-                        to_pnt = self._pnt(first + window, seg_from, layer.z_axis)
-
-                    placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
-                        self._next_position(),
-                        shape,
-                        from_pnt,
-                        to_pnt,
-                        0,
-                        0,
-                        1)
-                else:
-                    if run_axis == 0:
-                        from_pnt = self._pnt(seg_from, first, layer.z_axis)
-                        to_pnt = self._pnt(seg_from, last, layer.z_axis)
-                    else:
-                        from_pnt = self._pnt(first, seg_from, layer.z_axis)
-                        to_pnt = self._pnt(last, seg_from, layer.z_axis)
-
-                    placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
-                        self._next_position(),
-                        shape,
-                        from_pnt,
-                        to_pnt,
-                        0,
-                        0,
-                        run.spacing)
-
-                self._set_placement_layer(placement, layer.allplan_layer)
-                placements.append(placement)
+                # Stossversatz: gerade und ungerade Stäbe des Laufes werden
+                # getrennt verlegt (doppelter Abstand), damit die Stösse
+                # benachbarter Stäbe zueinander versetzt liegen
+                for positions, shift in self._stagger_groups(run.positions, layer):
+                    for piece in self._lap_pieces(segment, layer, shift, zones):
+                        placements.append(
+                            self._place_contour_piece(layer, run_axis, piece, positions))
 
         layer.placements = placements
 
         return placements
+
+
+    def _stagger_groups(self,
+                        positions: list[float],
+                        layer: LayerConfig) -> list[tuple[list[float], float]]:
+        """Teilt einen Verlegelauf für den Stossversatz auf.
+
+        Ohne Versatz (oder wenn ohnehin nicht gestossen wird) bleibt es bei
+        einer Gruppe. Sonst werden gerade und ungerade Stäbe getrennt, damit
+        beide Gruppen unterschiedliche Stosslagen bekommen können.
+        """
+
+        stagger_offset = self.stagger_factor * self.overlap_factor * layer.diameter
+
+        if not self.stagger_active or stagger_offset <= 0 or len(positions) < 2:
+            return [(positions, 0.0)]
+
+        return [(positions[0::2], stagger_shift(0, stagger_offset)),
+                (positions[1::2], stagger_shift(1, stagger_offset))]
+
+
+    def _stagger_regions(self,
+                         spacing: float,
+                         cover_from: float,
+                         layer: LayerConfig) -> list[tuple[float, float, float]]:
+        """Stossversatz im Rechteckmodus.
+
+        Statt eines Placements mit dem Stababstand a entstehen zwei
+        Placements mit 2a — das zweite um a versetzt. Beide bekommen eine
+        eigene Stosslage, sodass in jedem Schnitt höchstens die Hälfte der
+        Stäbe gestossen ist (SIA 262, Ziff. 5.2.6.6).
+
+        Returns:
+            Liste (Stababstand, Verteil-Deckung am Anfang, Stossverschiebung)
+        """
+
+        stagger_offset = self.stagger_factor * self.overlap_factor * layer.diameter
+
+        if not self.stagger_active or stagger_offset <= 0:
+            return [(spacing, cover_from, 0.0)]
+
+        return [(2 * spacing, cover_from, stagger_shift(0, stagger_offset)),
+                (2 * spacing, cover_from + spacing, stagger_shift(1, stagger_offset))]
+
+
+    def _lap_pieces(self,
+                    segment: tuple[float, float],
+                    layer: LayerConfig,
+                    preferred_shift: float,
+                    forbidden_zones: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        """Zerlegt ein Stabsegment in gestossene Teilstäbe."""
+
+        lap_length = self.overlap_factor * layer.diameter
+
+        if self.max_bar_length <= lap_length:
+            print(f'SlabReinforcement: max. Stablänge {self.max_bar_length} ist nicht '
+                  f'größer als die Übergreifungslänge {lap_length} — es wird nicht gestossen')
+            return [segment]
+
+        return split_with_preferred_joints(segment,
+                                           self.max_bar_length,
+                                           lap_length,
+                                           preferred_shift=preferred_shift,
+                                           forbidden_zones=forbidden_zones,
+                                           min_piece_length=2 * lap_length)
+
+
+    def _lap_forbidden_zones(self,
+                             run_axis: int,
+                             positions: list[float]) -> list[tuple[float, float]]:
+        """Sperrzonen für Stossfugen: Bereiche der Öffnungen, die von diesem
+        Verlegelauf gekreuzt werden, zuzüglich Sicherheitsabstand.
+        """
+
+        if not self.contour_openings or self.lap_opening_margin <= 0:
+            return []
+
+        dist_axis = 1 - run_axis
+        run_from, run_to = positions[0], positions[-1]
+
+        zones = []
+
+        for opening in self.contour_openings:
+            bbox = loop_bbox(opening)
+
+            if bbox[dist_axis + 2] < run_from or bbox[dist_axis] > run_to:
+                continue
+
+            zones.append((bbox[run_axis] - self.lap_opening_margin,
+                          bbox[run_axis + 2] + self.lap_opening_margin))
+
+        return zones
+
+
+    def _place_contour_piece(self,
+                             layer: LayerConfig,
+                             run_axis: int,
+                             piece: tuple[float, float],
+                             positions: list[float]) -> AllplanReinf.BarPlacement:
+        """Erzeugt das Placement eines Teilstabes über die gegebenen
+        Scan-Positionen.
+        """
+
+        piece_from, piece_to = piece
+
+        # Nettolänge: die Deckung steckt bereits in den Segmentgrenzen
+        shape = self._create_straight_bar_shape(layer, piece_to - piece_from, 0.0, 0.0)
+
+        first, last = positions[0], positions[-1]
+
+        if len(positions) == 1:
+            # Einzelstab: halben Lagenabstand als Verlegefenster, der Stab
+            # landet mittig exakt auf der Scan-Position
+            window = layer.spacing / 2.0
+            first, last = first - window, first + window
+
+        if run_axis == 0:
+            from_pnt = self._pnt(piece_from, first, layer.z_axis)
+            to_pnt = self._pnt(piece_from, last, layer.z_axis)
+        else:
+            from_pnt = self._pnt(first, piece_from, layer.z_axis)
+            to_pnt = self._pnt(last, piece_from, layer.z_axis)
+
+        if len(positions) == 1:
+            placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
+                self._next_position(), shape, from_pnt, to_pnt, 0, 0, 1)
+        else:
+            spacing = (last - first) / (len(positions) - 1)
+
+            placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                self._next_position(), shape, from_pnt, to_pnt, 0, 0, spacing)
+
+        self._set_placement_layer(placement, layer.allplan_layer)
+
+        return placement

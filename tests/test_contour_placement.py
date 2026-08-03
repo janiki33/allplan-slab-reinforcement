@@ -1,14 +1,16 @@
 """Tests für die Scanline-Logik polygonaler Konturen (ohne Allplan lauffähig)."""
 
+import math
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScripts' / 'SlabReinforcement'))
 
-from contour_placement import (compute_contour_bars, group_bars_into_runs,
-                               group_bars_into_steps, loop_area, loop_bbox,
-                               scan_positions, split_closed_loops)
+from contour_placement import (compute_contour_bars, edge_setback,
+                               group_bars_into_runs, group_bars_into_steps,
+                               loop_area, loop_bbox, scan_positions,
+                               split_closed_loops)
 
 RECT = [(0, 0), (5000, 0), (5000, 4000), (0, 4000)]
 
@@ -76,12 +78,14 @@ class ScanPositionsTest(unittest.TestCase):
 class ComputeContourBarsTest(unittest.TestCase):
 
     def test_rectangle_all_bars_full_length(self):
-        # Stäbe in X, Scan entlang Y; Deckung 25, Abstand 150
+        # Stäbe in X, Scan entlang Y; Deckung 25, Abstand 150.
+        # Die Segmente sind Nettomasse: an den rechtwinkligen Rändern ist
+        # die Deckung 1:1 abgezogen.
         bars = compute_contour_bars(RECT, [], 0, 150, 25, 300)
 
         self.assertEqual(bars[0].position, 25)
-        self.assertEqual(bars[0].segments, ((0, 5000),))
-        self.assertTrue(all(bar.segments == ((0, 5000),) for bar in bars))
+        self.assertEqual(bars[0].segments, ((25, 4975),))
+        self.assertTrue(all(bar.segments == ((25, 4975),) for bar in bars))
 
     def test_l_shape_bars_get_shorter_in_notch(self):
         bars = compute_contour_bars(L_SHAPE, [], 0, 500, 0, 300)
@@ -143,6 +147,48 @@ class GroupBarsIntoRunsTest(unittest.TestCase):
         # Verdichtungszonen und Mittelbereich bilden getrennte Läufe
         self.assertGreaterEqual(len(runs), 3)
         self.assertEqual(runs[0].spacing, 100)
+
+
+class EdgeCoverTest(unittest.TestCase):
+    """Betondeckung senkrecht zur Kante (auch an Schrägen)."""
+
+    def test_perpendicular_edge_uses_the_plain_cover(self):
+        self.assertAlmostEqual(edge_setback(30, 1.0), 30, places=6)
+
+    def test_slanted_edge_needs_a_larger_setback(self):
+        # 45°: 30 / sin(45°) = 42.43
+        self.assertAlmostEqual(edge_setback(30, math.sin(math.radians(45))),
+                               30 / math.sin(math.radians(45)), places=6)
+
+    def test_setback_is_capped_for_sharp_angles(self):
+        self.assertEqual(edge_setback(30, math.sin(math.radians(5)), max_setback=120), 120)
+
+    def test_no_cover_means_no_setback(self):
+        self.assertEqual(edge_setback(0, 0.5), 0.0)
+
+    def test_bar_keeps_perpendicular_cover_at_a_45_degree_edge(self):
+        # Schräge von (3000,0) nach (5000,2000): bei y ist x_kante = 3000 + y
+        contour = [(0, 0), (3000, 0), (5000, 2000), (5000, 4000), (0, 4000)]
+        cover = 30
+
+        bars = compute_contour_bars(contour, [], 0, 500, cover, 100)
+        bar = bars[0]
+
+        edge_x = 3000 + bar.position
+        setback = edge_x - bar.segments[0][1]
+
+        # senkrechter Abstand = axialer Rückversatz x sin(45°)
+        self.assertAlmostEqual(setback * math.sin(math.radians(45)), cover, places=6)
+
+    def test_opening_edges_keep_their_cover_too(self):
+        opening = [(1000, 1000), (2000, 1000), (2000, 2000), (1000, 2000)]
+        bars = compute_contour_bars(RECT, [opening], 0, 500, 25, 100)
+
+        bar = next(bar for bar in bars if 1000 < bar.position < 2000)
+
+        # Loch wächst um die Deckung -> Stabenden halten Abstand zur Öffnung
+        self.assertAlmostEqual(bar.segments[0][1], 1000 - 25, places=6)
+        self.assertAlmostEqual(bar.segments[1][0], 2000 + 25, places=6)
 
 
 class GroupBarsIntoStepsTest(unittest.TestCase):

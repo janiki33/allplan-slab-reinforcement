@@ -73,16 +73,21 @@ def loop_bbox(loop: Loop) -> tuple[float, float, float, float]:
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def _crossings(loop: Loop, run_axis: int, coord: float) -> list[float]:
-    """Schnittpunkte der Scanlinie (dist-Koordinate = coord) mit den
-    Kanten des Loops, als Koordinaten auf der run-Achse.
+def _crossings(loop: Loop, run_axis: int, coord: float) -> list[tuple[float, float]]:
+    """Schnittpunkte der Scanlinie (dist-Koordinate = coord) mit den Kanten
+    des Loops.
 
     Halboffene Regel (d1 <= coord < d2), damit Scheitelpunkte nicht doppelt
     zählen — Standard-Scanline-Verfahren.
+
+    Returns:
+        Liste (Koordinate auf der run-Achse, sin des Winkels zwischen
+        Stabrichtung und geschnittener Kante), aufsteigend sortiert.
+        sin = 1 bei einer Kante rechtwinklig zum Stab, kleiner bei Schrägen.
     """
 
     dist_axis = 1 - run_axis
-    crossings: list[float] = []
+    crossings: list[tuple[float, float]] = []
 
     for i, p1 in enumerate(loop):
         p2 = loop[(i + 1) % len(loop)]
@@ -94,19 +99,73 @@ def _crossings(loop: Loop, run_axis: int, coord: float) -> list[float]:
 
         if (d1 <= coord < d2) or (d2 <= coord < d1):
             t = (coord - d1) / (d2 - d1)
-            crossings.append(p1[run_axis] + t * (p2[run_axis] - p1[run_axis]))
+
+            edge_run = p2[run_axis] - p1[run_axis]
+            edge_dist = d2 - d1
+            edge_length = math.hypot(edge_run, edge_dist)
+
+            sin_alpha = abs(edge_dist) / edge_length if edge_length else 1.0
+
+            crossings.append((p1[run_axis] + t * edge_run, sin_alpha))
 
     crossings.sort()
 
     return crossings
 
 
-def _intervals_at(loop: Loop, run_axis: int, coord: float) -> list[Interval]:
-    """Innen-Intervalle des Loops entlang der run-Achse bei coord."""
+def edge_setback(cover: float, sin_alpha: float, max_setback: float = 0.0) -> float:
+    """Rückversatz des Stabendes entlang der Stabachse, damit die
+    Betondeckung **senkrecht** zur Kante eingehalten wird.
+
+    Bei einer Kante rechtwinklig zum Stab (sin = 1) ist der Rückversatz
+    gleich der Deckung. Bei einer Schräge unter dem Winkel alpha wächst er
+    auf cover / sin(alpha) an — bei spitzen Winkeln stark, deshalb die
+    Begrenzung max_setback (0 = unbegrenzt).
+    """
+
+    if cover <= 0:
+        return 0.0
+
+    if sin_alpha <= 1e-6:
+        return max_setback if max_setback > 0 else cover
+
+    setback = cover / sin_alpha
+
+    if max_setback > 0:
+        setback = min(setback, max_setback)
+
+    return setback
+
+
+def _intervals_at(loop: Loop,
+                  run_axis: int,
+                  coord: float,
+                  cover: float = 0.0,
+                  max_setback: float = 0.0,
+                  as_hole: bool = False) -> list[Interval]:
+    """Innen-Intervalle des Loops entlang der run-Achse bei coord.
+
+    Mit cover > 0 werden die Intervalle um den kantenabhängigen Rückversatz
+    verkleinert (Kontur) bzw. vergrößert (as_hole=True für Öffnungen, deren
+    Rand ebenfalls Deckung braucht).
+    """
 
     crossings = _crossings(loop, run_axis, coord)
 
-    return [(crossings[i], crossings[i + 1]) for i in range(0, len(crossings) - 1, 2)]
+    intervals: list[Interval] = []
+
+    for i in range(0, len(crossings) - 1, 2):
+        (start, sin_start), (end, sin_end) = crossings[i], crossings[i + 1]
+
+        setback_start = edge_setback(cover, sin_start, max_setback)
+        setback_end = edge_setback(cover, sin_end, max_setback)
+
+        if as_hole:
+            intervals.append((start - setback_start, end + setback_end))
+        else:
+            intervals.append((start + setback_start, end - setback_end))
+
+    return intervals
 
 
 def _subtract_intervals(intervals: list[Interval],
@@ -188,14 +247,19 @@ def compute_contour_bars(contour: Loop,
                          side_cover: float,
                          min_bar_length: float,
                          edge_zone_length: float = 0.0,
-                         edge_zone_spacing: float = 0.0) -> list[ContourBar]:
+                         edge_zone_spacing: float = 0.0,
+                         max_setback: float = 0.0) -> list[ContourBar]:
     """Scanline-Verlegung: für jede Scan-Position die Stab-Segmente
     innerhalb der Kontur abzüglich der Öffnungen.
 
-    side_cover wird als Randabstand der Scan-Positionen auf der dist-Achse
-    berücksichtigt; auf der Stabachse werden Segmente verworfen, deren
-    Stablänge (Segment − 2 x side_cover) unter min_bar_length liegt —
-    die Deckung selbst zieht später der Shape-Builder ab.
+    Die zurückgegebenen Segmente sind **Nettomasse**: Die Betondeckung ist
+    bereits abgezogen, und zwar senkrecht zur jeweils geschnittenen Kante
+    (an Schrägen also mit dem größeren Rückversatz cover/sin(alpha), nach
+    oben begrenzt durch max_setback). Ränder von Öffnungen erhalten
+    dieselbe Deckung.
+
+    side_cover wirkt zusätzlich als Randabstand der Scan-Positionen auf der
+    dist-Achse. Segmente kürzer als min_bar_length entfallen.
     """
 
     dist_axis = 1 - run_axis
@@ -208,16 +272,18 @@ def compute_contour_bars(contour: Loop,
 
     for position in scan_positions(dist_min, dist_max, spacing,
                                    edge_zone_length, edge_zone_spacing):
-        intervals = _intervals_at(contour, run_axis, position)
+        intervals = _intervals_at(contour, run_axis, position,
+                                  side_cover, max_setback)
 
         holes: list[Interval] = []
         for opening in openings:
-            holes += _intervals_at(opening, run_axis, position)
+            holes += _intervals_at(opening, run_axis, position,
+                                   side_cover, max_setback, as_hole=True)
 
         segments = tuple(
             (seg_from, seg_to)
             for seg_from, seg_to in _subtract_intervals(intervals, holes)
-            if seg_to - seg_from - 2 * side_cover >= min_bar_length)
+            if seg_to - seg_from >= min_bar_length)
 
         if segments:
             bars.append(ContourBar(position, segments))

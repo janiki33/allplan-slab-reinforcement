@@ -174,15 +174,154 @@ Lage; X- und Y-Zulagen gestapelt), damit sich keine Stäbe durchdringen.
 Lagen, für die die Plattendicke nicht ausreicht, entfallen mit einer Meldung
 im Trace-Fenster statt falsch erzeugt zu werden.
 
-### Normen / Bemessung
+## Konzept: Stösse, Schrägen, Öffnungen (Schweizer Praxis / SIA 262)
 
-Bewusst **keine** fest codierten Eurocode-Regeln: Die Übergreifungslänge der
-Randverstärkung ist ein freier Palettenparameter (Default 800 mm — reiner
-Platzhalter, kein Normwert). Stababstände, Deckungen und Zulagenanzahl sind
-ebenfalls frei. Einzige normabhängige Automatik: der Biegerollendurchmesser
-wird über `AllplanReinf.BendingRollerService.GetBendingRollerFactor(...)`
-aus den Allplan-Projekteinstellungen ermittelt (so auch im offiziellen
-Beispiel). Die Bemessung bleibt Aufgabe der Tragwerksplanung.
+Quellenlage: Die SIA 262 wurde teilrevidiert und ist per **1.11.2025** in
+Kraft; die Abschnitte Verankerung/Stösse wurden überarbeitet. Die Zitate
+unten stammen aus dem **Vernehmlassungsentwurf prSIA 262:2024-04** (das
+Dokument trägt den Vermerk „keine Gültigkeit") und aus der **Richtlinie zur
+Betonstahlverarbeitung, 1. Auflage 2025 (SSHV/SIA)**. Vor produktivem
+Einsatz an der gekauften Endfassung gegenprüfen.
+
+### 1. Stösse — wann
+
+Gestossen wird, sobald die erforderliche Stablänge die einstellbare
+**maximale Stablänge** überschreitet (Palette „Stösse", Default **8.0 m**
+auf deinen Wunsch). Zum Vergleich die Verarbeitungsrichtlinie: abgewickelte
+Länge bei Stabmaterial **in der Regel 12 m, ausnahmsweise 14 m** (Ziff.
+3.3.2); ausserdem sollen Stäbe **über 60 kg** vermieden werden (Ziff.
+3.3.3) — bei Ø30 sind das schon ~10.8 m. Biegeformen sollen in ein
+Rechteck **2.4 × 12.0 m** passen (Ziff. 3.3.1).
+
+### 2. Stösse — wie viele Teilstäbe
+
+Die kleinste Anzahl *n*, mit der alle Teilstäbe die zulässige Länge
+einhalten. Bei *n* Teilstäben gibt es *(n−1)* Übergreifungen, also gilt
+`n · l_max ≥ L + (n−1) · l_s`. Die Teilung erfolgt in **gleich lange
+Stäbe** — das minimiert die Anzahl Positionen, was die Richtlinie
+ausdrücklich verlangt („In der Regel gilt es, die Anzahl Positionen zu
+minimieren", Ziff. 4.1.1) und wofür je Position ein fixer Betrag
+verrechnet wird (Ziff. 7.1).
+
+### 3. Stösse — wo, und der Versatz
+
+**Normativ (prSIA 262, Ziff. 5.2.6.6):** Bei Zugstäben muss für
+1.2 σ_sd statt 1.0 σ_sd bemessen werden — **ausser** wenn bei **Platten
+höchstens die Hälfte der Stäbe** gestossen ist **und** der Abstand
+zwischen verschiedenen Übergreifungsstössen **mindestens 0.3 · l_sd**
+beträgt. Genau das setzt das Tool um:
+
+- Ein Verlegelauf wird in **gerade und ungerade Stäbe** aufgeteilt (zwei
+  Placements mit doppeltem Stababstand). Damit ist in jedem Schnitt
+  höchstens die Hälfte der Stäbe gestossen.
+- Beide Gruppen erhalten gegenläufig verschobene Stosslagen; der
+  Längsversatz ist **`StaggerFactor` × Übergreifungslänge**, Default
+  **0.3** entsprechend der Norm.
+
+**Ebenfalls normativ (Ziff. 5.2.6.3):** *„Stossverbindungen sind nach
+Möglichkeit in Zonen geringer Beanspruchung anzuordnen."* Da du Wände und
+Lastverteilung ausdrücklich ausgeklammert hast, kennt das Tool die
+Auflager nicht und kann diese Zonen nicht selbst bestimmen. Es setzt die
+Stösse deshalb geometrisch gleichmässig und hält sie nur von Öffnungen
+frei. **Das bleibt eine Prüfaufgabe:** Als Praxisregel gilt für
+Flachdecken — untere Bewehrung im Auflagerbereich stossen, obere
+Bewehrung im Feld, nie über der Stütze. Zu beachten ist zusätzlich
+Ziff. 5.5.3.3: mindestens die Hälfte der Feldbewehrung ist **bis über die
+Auflager** zu führen.
+
+**Öffnungen:** Stossfugen werden aus einer Sperrzone um jede Öffnung
+herausgeschoben (`LapOpeningMargin`, Default 500 mm). Reicht der
+zulässige Spielraum nicht, wird die Lage gewählt, die den grössten
+Abstand zur Sperrzone hat.
+
+### 4. Übergreifungslänge
+
+`l_s = OverlapFactor × ø`, Default **50 ø** (dein bisheriger Bürowert).
+**Wichtiger Hinweis:** Nach prSIA 262 gilt `l_sd = 1.2 · l_bd` (min. 15 ø),
+und l_bd hängt von Betonsorte, **Verbundbedingung**, Stabdurchmesser und
+rechnerischer Überdeckung ab (Gl. 106, Tabellen 19/20). Debrunner Acifer
+weist ausdrücklich darauf hin, dass die alte Faustregel **50 ø künftig
+nicht mehr generell ausreicht** — insbesondere bei *mässigen*
+Verbundbedingungen (+20 %). Verbundbedingungen sind *gut*, wenn der Stab
+≤ 300 mm über dem Schalungsboden oder > 300 mm unter der Oberfläche der
+Betonieretappe liegt — bei üblichen Deckenstärken also beide Lagen, bei
+dicken Bodenplatten ist die **obere Lage mässig**. Der Faktor bleibt
+deshalb ein Palettenwert und wird nicht fest codiert.
+
+### 5. Schrägen — Abtreppung
+
+Für die Abtreppung gibt es **keine SIA- oder Verbandsregel** (geprüft in
+prSIA 262 und in der Verarbeitungsrichtlinie). Das Tool verwendet daher
+eine klar definierte, konfigurierbare **Bürostandard-Regel**:
+
+> Aufeinanderfolgende Stäbe bilden eine Stufe, solange **kein Stab der
+> Stufe dadurch mehr als `StepMaxLoss` kürzer wird**, als er geometrisch
+> sein könnte (Default 250 mm). Alle Stäbe einer Stufe erhalten dieselbe
+> Länge: Anfang = grösster Anfang, Ende = kleinstes Ende der Stufe.
+
+Daraus folgt unmittelbar:
+
+- Kein Stab ragt je über die Betonkante hinaus (es wird immer das
+  ungünstigste Ende der Stufe verwendet, und das Längenraster
+  `StepLengthRaster`, Default 50 mm, rundet **nach innen**).
+- Die unbewehrte Zone an der Schräge ist durch `StepMaxLoss` begrenzt.
+- Ein grösserer Wert ergibt weniger, dafür gröbere Stufen — bei 45° und
+  15 cm Stababstand liefert der Default 2 Stäbe je Stufe und 30 cm
+  Längensprung.
+- Eine Stufe bricht ausserdem, wo sich die Segmentanzahl ändert (Beginn
+  einer Öffnung) oder der Stababstand wechselt. Rechtwinklige Bereiche
+  bleiben ein einziges Placement.
+
+**Betondeckung an der Schräge:** Die Deckung wird **senkrecht zur Kante**
+eingehalten. Bei einem Winkel α zwischen Stabachse und Kante ist der
+Rückversatz in Stabrichtung `c / sin α` — bei 45° also das 1.41-fache der
+Deckung. Für spitze Winkel begrenzt `MaxEdgeSetback` (Default 150 mm) den
+Rückversatz, damit Stäbe in spitzen Ecken nicht unbrauchbar kurz werden.
+Öffnungsränder erhalten dieselbe Behandlung.
+
+### 6. Öffnungen — Zulagen
+
+Auch hier gibt es **in SIA 262 keine Regel** zur Zulagebewehrung um
+Deckenöffnungen; die Norm fordert lediglich, freie Plattenränder mit
+aufgebogener Längsbewehrung oder Bügeln zu umschliessen (Ziff. 4.4 /
+5.5.3.5). Die im Tool umgesetzten Zulagen (Anzahl, Ø, Abstand, Überstand)
+sind daher **konfigurierbarer Bürostandard, nicht normbelegt**. Verbreitete
+Praxis: mindestens die gekappte Querschnittsfläche je Richtung zulegen und
+die Zulagen um mindestens die Verankerungslänge über die Öffnungsecke
+hinausführen; zusätzlich Diagonalstäbe an den Ecken gegen die 45°-Risse.
+Diagonalzulagen erzeugt das Tool derzeit **nicht** (Roadmap v0.4).
+
+### 7. Betondeckung — Nennwerte
+
+prSIA 262 Tabelle 18, planmässige Bewehrungsüberdeckung `c_nom` [mm]:
+
+| XC1 | XC2 | XC3 | XC4 | XD1–XD3 |
+|-----|-----|-----|-----|---------|
+| 20  | 35  | 40  | 40  | 55      |
+
+Zuordnung: XC1 Geschossdecke innen (trocken), XC2 Fundationen/erdberührt,
+XC3 mässige Feuchte bzw. aussen vor Regen geschützt, XC4 aussen
+ungeschützt, XD3 Parkdeck/Taumittel. **Zwingend zusätzlich (Ziff.
+5.2.2.5):** Beton direkt gegen Erdreich `c_nom ≥ 90 mm`, gegen
+vorbereiteten Untergrund (Sauberkeitsschicht) `≥ 50 mm`. Massgebend ist
+stets der grösste Wert aus Verbund, Feuerwiderstand und Korrosion
+(Ziff. 5.2.2.1). SIA arbeitet **nicht** mit einem additiven Δc_dev wie
+EC2 — `c_nom` ist bereits der Planwert. Der Palettenwert
+„Betondeckung" (Default 35 mm) ist entsprechend zu setzen.
+
+### Normen / Bemessung — Zusammenfassung
+
+Es sind **keine** Normwerte fest codiert. Normativ begründete Defaults
+(Stossversatz 0.3 × l_s, max. 50 % gestossene Stäbe je Schnitt) sind als
+Palettenwerte einstellbar und oben mit Fundstelle belegt. Alles, wofür es
+in SIA 262 keine Regel gibt — Abtreppung, Öffnungszulagen, Stosslänge als
+Faktor × ø — ist ausdrücklich als konfigurierbarer Bürostandard
+gekennzeichnet. Einzige normabhängige Automatik: der
+Biegerollendurchmesser über
+`AllplanReinf.BendingRollerService.GetBendingRollerFactor(...)` aus den
+Allplan-Projekteinstellungen (SIA 262: d₃ = 4 ø bis Ø16, 7 ø bis Ø30).
+**Die Bemessung bleibt Aufgabe der Tragwerksplanung** — das Tool verlegt
+geometrisch, es bemisst nicht.
 
 ## Recherche-Zusammenfassung (Quellen)
 
