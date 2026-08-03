@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Synchronisiert die SlabReinforcement-Dateien aus GitHub in das lokale
     Allplan-Benutzerverzeichnis.
@@ -24,9 +24,12 @@
     erneut. Ohne diesen Parameter laeuft es genau einmal durch.
 
 .PARAMETER RemoveStale
-    Entfernt die veraltete Datei SlabReinforcement.py aus dem Zielordner. Diese
-    Datei stammt aus einer aelteren Version; solange sie existiert, kollidiert
-    ihr Name mit dem Paketordner und der Import schlaegt fehl.
+    Entfernt veraltete Dateien aus dem Zielordner (SlabReinforcement.py und
+    SlabReinforcementScript.py aus frueheren Versionen). Das PythonPart ist
+    inzwischen ein Python-Paket: der Ordner SlabReinforcement enthaelt ein
+    __init__.py, die .pyp verweist auf SlabReinforcement.py - eine Datei, die
+    es bewusst nicht gibt. Eine uebriggebliebene gleichnamige Datei wuerde den
+    Paketordner verdecken.
 
 .PARAMETER Install
     Registriert eine geplante Aufgabe (Task Scheduler), die diesen Sync bei der
@@ -65,8 +68,10 @@ $TaskName = 'AllplanSlabReinforcementSync'
 
 # Quelle (Pfad im Repo) -> Ziel (Pfad relativ zu $AllplanUsr)
 $FileMap = @(
-    @{ Source = 'PythonPartsScripts/SlabReinforcement/SlabReinforcementScript.py'
-       Target = 'PythonPartsScripts\SlabReinforcement\SlabReinforcementScript.py' }
+    @{ Source = 'PythonPartsScripts/SlabReinforcement/__init__.py'
+       Target = 'PythonPartsScripts\SlabReinforcement\__init__.py' }
+    @{ Source = 'PythonPartsScripts/SlabReinforcement/slab_reinforcement.py'
+       Target = 'PythonPartsScripts\SlabReinforcement\slab_reinforcement.py' }
     @{ Source = 'PythonPartsScripts/SlabReinforcement/contour_placement.py'
        Target = 'PythonPartsScripts\SlabReinforcement\contour_placement.py' }
     @{ Source = 'PythonPartsScripts/SlabReinforcement/opening_clipping.py'
@@ -80,6 +85,7 @@ $FileMap = @(
 # Dateien, die aus frueheren Versionen stammen und nicht mehr vorhanden sein duerfen.
 $StaleFiles = @(
     'PythonPartsScripts\SlabReinforcement\SlabReinforcement.py'
+    'PythonPartsScripts\SlabReinforcement\SlabReinforcementScript.py'
 )
 
 
