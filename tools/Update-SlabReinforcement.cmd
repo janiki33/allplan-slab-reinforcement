@@ -22,6 +22,10 @@ set "BRANCH=claude/new-session-8uzquy"
 set "TOOLBRANCH=claude/slab-reinforcement-sync-nykay9"
 set "TARGET=J:\Allplan\Usr\Janosch"
 
+rem Fassung, die das Sync-Skript mindestens haben muss. Verhindert, dass eine
+rem veraltete Kopie aus einem Cache stillschweigend durchlaeuft.
+set "NEEDVERSION=2"
+
 set "CACHEDIR=%LOCALAPPDATA%\AllplanSlabReinforcementSync"
 set "PS1=%~dp0Sync-SlabReinforcement.ps1"
 
@@ -33,22 +37,25 @@ echo ============================================================
 echo.
 
 rem Liegt das Sync-Skript daneben, wird es benutzt. Sonst aus GitHub holen.
-if exist "%PS1%" goto :run
+if exist "%PS1%" goto :check
 
 set "PS1=%CACHEDIR%\Sync-SlabReinforcement.ps1"
 if not exist "%CACHEDIR%" mkdir "%CACHEDIR%" >nul 2>&1
 
 echo Hole Sync-Skript von GitHub ...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Headers @{'Cache-Control'='no-cache'} -Uri 'https://raw.githubusercontent.com/%REPO%/%TOOLBRANCH%/tools/Sync-SlabReinforcement.ps1' -OutFile '%CACHEDIR%\Sync-SlabReinforcement.ps1.new'; Move-Item -LiteralPath '%CACHEDIR%\Sync-SlabReinforcement.ps1.new' -Destination '%CACHEDIR%\Sync-SlabReinforcement.ps1' -Force"
 
-if not errorlevel 1 goto :run
+rem Bewusst ueber die API statt ueber raw.githubusercontent.com: der CDN dort
+rem liefert nach einem Push noch minutenlang den alten Stand aus.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $u='https://api.github.com/repos/%REPO%/contents/tools/Sync-SlabReinforcement.ps1?ref='+[uri]::EscapeDataString('%TOOLBRANCH%'); $h=@{'Accept'='application/vnd.github.raw';'User-Agent'='AllplanSlabReinforcementSync';'Cache-Control'='no-cache'}; Invoke-WebRequest -Uri $u -Headers $h -UseBasicParsing -TimeoutSec 60 -OutFile '%CACHEDIR%\Sync-SlabReinforcement.ps1.new'; Move-Item -LiteralPath '%CACHEDIR%\Sync-SlabReinforcement.ps1.new' -Destination '%CACHEDIR%\Sync-SlabReinforcement.ps1' -Force"
+
+if not errorlevel 1 goto :check
 
 if exist "%PS1%" (
     echo.
-    echo   Warnung: Download fehlgeschlagen - benutze die zuletzt gespeicherte Fassung.
+    echo   Warnung: Download fehlgeschlagen - pruefe die gespeicherte Fassung.
     echo.
-    goto :run
+    goto :check
 )
 
 echo.
@@ -57,6 +64,23 @@ echo           gespeicherte Fassung vor. Internetverbindung pruefen.
 echo.
 pause
 exit /b 3
+
+:check
+rem Fassung pruefen, damit kein alter Zwischenstand unbemerkt durchlaeuft.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$m = Select-String -LiteralPath '%PS1%' -Pattern 'ScriptVersion\s*=\s*(\d+)' | Select-Object -First 1; if (-not $m) { exit 1 }; if ([int]$m.Matches[0].Groups[1].Value -lt %NEEDVERSION%) { exit 1 }; exit 0"
+
+if not errorlevel 1 goto :run
+
+echo.
+echo   FEHLER: Das geladene Sync-Skript ist aelter als Fassung %NEEDVERSION%.
+echo           Vermutlich hat ein Cache eine veraltete Kopie geliefert.
+echo           Der Zwischenspeicher wird jetzt geloescht - bitte diese Datei
+echo           einfach noch einmal starten.
+echo.
+del "%CACHEDIR%\Sync-SlabReinforcement.ps1" >nul 2>&1
+pause
+exit /b 4
 
 :run
 echo.

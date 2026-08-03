@@ -79,6 +79,10 @@ $ErrorActionPreference = 'Stop'
 
 $TaskName = 'AllplanSlabReinforcementSync'
 
+# Wird beim Start protokolliert und von Update-SlabReinforcement.cmd geprueft,
+# damit nie unbemerkt eine veraltete Fassung aus einem Cache laeuft.
+$ScriptVersion = 2
+
 # Gespiegelte Ordner: Pfad im Repository -> Pfad relativ zu $AllplanUsr
 $SyncDirs = @(
     @{ Source = 'PythonPartsScripts/SlabReinforcement'; Target = 'PythonPartsScripts\SlabReinforcement' }
@@ -400,7 +404,7 @@ if (-not (Test-Path -LiteralPath $AllplanUsr)) {
     exit 2
 }
 
-Write-Log "Abgleich $Repo@$Branch -> $AllplanUsr"
+Write-Log "Abgleich $Repo@$Branch -> $AllplanUsr (Skriptfassung $ScriptVersion)"
 
 if ($IntervalSeconds -gt 0) {
     Write-Log "Dauerbetrieb: Pruefung alle $IntervalSeconds Sekunden (Abbruch mit Strg+C)."
