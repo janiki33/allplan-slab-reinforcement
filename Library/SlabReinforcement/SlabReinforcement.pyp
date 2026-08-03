@@ -122,6 +122,13 @@
             <ValueType>Length</ValueType>
           </Parameter>
           <Parameter>
+            <Name>RectBoundary</Name>
+            <Text>Rechteckgrenze</Text>
+            <Value>An Konturkanten</Value>
+            <ValueList>An Konturkanten|Am Beginn der Schräge</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
             <Name>MaxEdgeSetback</Name>
             <Text>Max. Rückversatz an spitzen Winkeln</Text>
             <Value>150</Value>

@@ -374,5 +374,73 @@ class DecompositionTest(unittest.TestCase):
         self.assertEqual(_round_outward((10, 20), 0), (10, 20))
 
 
+class ZoneVariantTest(unittest.TestCase):
+    """Variante A/B der Rechteckgrenze und Vermeidung von Einzelstäben."""
+
+    SLAB = DecompositionTest.SLAB
+
+    def _zones(self, run_axis, snap):
+        bars = compute_contour_bars(self.SLAB, [], run_axis, 150.0, 40.0, 300.0,
+                                    max_setback=150.0, dist_margin=46.0)
+        return bars, decompose_into_zones(bars, self.SLAB, run_axis, 250.0, 50.0,
+                                          300.0, snap_to_contour=snap)
+
+    def test_variant_a_pulls_the_rectangle_to_a_contour_edge(self):
+        # Mittleres Band der X-Lage: Variante A endet an der Kante x=6748,
+        # Variante B erst am Beginn der Schräge
+        _, zones_a = self._zones(0, True)
+        _, zones_b = self._zones(0, False)
+
+        def middle_end(zones):
+            for zone in zones:
+                if zone.kind != 'rect':
+                    continue
+                for seg_from, seg_to in zone.segments[0]:
+                    if 3300 < seg_from < 3600 and zone.positions[0] > 3000:
+                        return seg_to
+            return None
+
+        self.assertAlmostEqual(middle_end(zones_a), 6748, delta=1)
+        self.assertGreater(middle_end(zones_b), 8000)
+
+    def test_variant_a_creates_more_steps(self):
+        _, zones_a = self._zones(0, True)
+        _, zones_b = self._zones(0, False)
+
+        steps_a = len([z for z in zones_a if z.kind == 'step'])
+        steps_b = len([z for z in zones_b if z.kind == 'step'])
+
+        self.assertGreater(steps_a, steps_b)
+
+    def test_straight_edge_is_not_snapped(self):
+        # Band ohne Schräge darf nicht an einer fremden Kante zerschnitten werden
+        _, zones = self._zones(0, True)
+
+        top = [z for z in zones if z.kind == 'rect' and z.positions[0] > 6800]
+
+        self.assertTrue(top)
+        for zone in top:
+            seg_from, seg_to = zone.segments[0][0]
+            self.assertGreater(seg_to - seg_from, 3000)
+
+    def test_no_single_bar_placements(self):
+        for run_axis in (0, 1):
+            for snap in (True, False):
+                _, zones = self._zones(run_axis, snap)
+
+                for zone in zones:
+                    self.assertGreater(len(zone.positions), 1,
+                                       f'Einzelstab in {zone.kind}-Zone bei '
+                                       f'{zone.positions} (run_axis={run_axis})')
+
+    def test_merged_single_bar_keeps_the_neighbour_length(self):
+        # Der zugeschlagene Stab bekommt die Länge der Nachbarverlegung
+        _, zones = self._zones(1, True)
+
+        for zone in zones:
+            self.assertEqual(len(zone.positions), len(zone.segments))
+            self.assertEqual(len(set(zone.segments)), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

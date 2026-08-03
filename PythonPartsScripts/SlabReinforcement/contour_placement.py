@@ -540,13 +540,22 @@ def decompose_into_zones(bars: list[ContourBar],
                          run_axis: int,
                          max_step_deviation: float,
                          length_raster: float = 0.0,
-                         min_bar_length: float = 0.0) -> list[PlacementZone]:
+                         min_bar_length: float = 0.0,
+                         snap_to_contour: bool = True) -> list[PlacementZone]:
     """Zerlegt die Stablinien in Rechteck- und Abtreppungszonen.
 
     Je zusammenhängendem Bereich (zwischen zwei Sprungstellen) wird der
     Teil, den alle Stäbe gemeinsam haben, zu einem Rechteck; was darüber
     oder darunter hinausragt, wird abgetreppt.
+
+    snap_to_contour (Variante A): Die Rechteckgrenze wird zusätzlich auf
+    die nächstgelegene Konturkante quer zur Stabrichtung gezogen, sodass
+    die Rechtecke über die Bänder hinweg fluchten. Ohne diese Option
+    (Variante B) endet das Rechteck genau dort, wo die Schräge beginnt.
     """
+
+    # Konturkoordinaten quer zur Stabrichtung = mögliche Rechteckgrenzen
+    snap_at = bar_parallel_breaks(contour, 1 - run_axis) if snap_to_contour else []
 
     zones: list[PlacementZone] = []
 
@@ -566,6 +575,12 @@ def decompose_into_zones(bars: list[ContourBar],
         common = tuple((max(bar.segments[i][0] for bar in group),
                         min(bar.segments[i][1] for bar in group))
                        for i in range(count))
+
+        # Variante A: Grenze auf eine Konturkante ziehen — aber nur an der
+        # Seite, an der überhaupt eine Schräge (Rest) vorhanden ist
+        if snap_at:
+            common = tuple(_snap_common(common[i], snap_at, group, i, min_bar_length)
+                           for i in range(count))
 
         rect = tuple(seg for seg in common if seg[1] - seg[0] >= min_bar_length)
 
@@ -654,7 +669,65 @@ def _steps_from_bars(bars: list[ContourBar],
 
     flush()
 
-    return zones
+    return _merge_single_bar_zones(zones)
+
+
+def _snap_common(seg: Interval,
+                 snap_at: list[float],
+                 group: list[ContourBar],
+                 index: int,
+                 min_bar_length: float) -> Interval:
+    """Zieht die Rechteckgrenze auf eine Konturkante quer zur Stabrichtung.
+
+    Nur die Seite wird gezogen, an der ein Stab über den gemeinsamen Teil
+    hinausragt — an einer geraden Kante bleibt das Rechteck unangetastet.
+    """
+
+    lo, hi = seg
+
+    has_upper_rest = any(bar.segments[index][1] > hi + 1.0 for bar in group)
+    has_lower_rest = any(bar.segments[index][0] < lo - 1.0 for bar in group)
+
+    if has_upper_rest:
+        below = [b for b in snap_at if lo + min_bar_length <= b < hi]
+        if below:
+            hi = max(below)
+
+    if has_lower_rest:
+        above = [b for b in snap_at if lo < b <= hi - min_bar_length]
+        if above:
+            lo = min(above)
+
+    return (lo, hi)
+
+
+def _merge_single_bar_zones(zones: list[PlacementZone]) -> list[PlacementZone]:
+    """Vermeidet Verlegungen mit nur einem Stab: Der einzelne Stab wird der
+    Nachbarverlegung zugeschlagen, die dafür verlängert wird.
+    """
+
+    merged: list[PlacementZone] = []
+
+    for zone in zones:
+        if len(zone.positions) == 1 and merged and \
+                len(merged[-1].segments[0]) == len(zone.segments[0]):
+            previous = merged[-1]
+            previous.positions.append(zone.positions[0])
+            previous.segments.append(previous.segments[0])
+            continue
+
+        merged.append(zone)
+
+    # Führt die Liste mit einem Einzelstab an, wird er der folgenden
+    # Verlegung zugeschlagen
+    if len(merged) > 1 and len(merged[0].positions) == 1 and \
+            len(merged[1].segments[0]) == len(merged[0].segments[0]):
+        following = merged[1]
+        following.positions.insert(0, merged[0].positions[0])
+        following.segments.insert(0, following.segments[0])
+        merged.pop(0)
+
+    return merged
 
 
 def _round_outward(seg: Interval, raster: float) -> Interval:

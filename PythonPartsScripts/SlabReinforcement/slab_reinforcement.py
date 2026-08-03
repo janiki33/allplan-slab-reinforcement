@@ -542,6 +542,10 @@ class SlabReinforcement():
         self.step_length_raster = build_ele.StepLengthRaster.value
         self.max_edge_setback = build_ele.MaxEdgeSetback.value
 
+        # Variante A: Rechteckgrenzen fluchten über die Bänder hinweg,
+        # Variante B: das Rechteck endet erst am Beginn der Schräge
+        self.snap_rect_to_contour = build_ele.RectBoundary.value == 'An Konturkanten'
+
         # Stösse
         self.max_bar_length = build_ele.MaxBarLength.value
         self._lap_warning_shown = False
