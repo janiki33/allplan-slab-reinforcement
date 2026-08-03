@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.3.2</Version>
+    <Version>0.3.3</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -500,7 +500,7 @@
           <Parameter>
             <Name>ConcreteCover</Name>
             <Text>Betondeckung (alle Lagen und Stabenden)</Text>
-            <Value>35</Value>
+            <Value>40</Value>
             <ValueType>ReinfConcreteCover</ValueType>
           </Parameter>
           <Parameter>
@@ -533,37 +533,37 @@
           <Parameter>
             <Name>LayerBottomX</Name>
             <Text>Layer untere Lage X</Text>
-            <Value>0</Value>
+            <Value>7580</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
             <Name>LayerBottomY</Name>
             <Text>Layer untere Lage Y</Text>
-            <Value>0</Value>
+            <Value>7586</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
             <Name>LayerTopX</Name>
             <Text>Layer obere Lage X</Text>
-            <Value>0</Value>
+            <Value>7583</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
             <Name>LayerTopY</Name>
             <Text>Layer obere Lage Y</Text>
-            <Value>0</Value>
+            <Value>7582</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
             <Name>LayerStirrupX</Name>
             <Text>Layer Randbügel links/rechts</Text>
-            <Value>0</Value>
+            <Value>64265</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
             <Name>LayerStirrupY</Name>
             <Text>Layer Randbügel unten/oben</Text>
-            <Value>0</Value>
+            <Value>64264</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
         </Parameters>

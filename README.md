@@ -315,6 +315,27 @@ die Zulagen um mindestens die Verankerungslänge über die Öffnungsecke
 hinausführen; zusätzlich Diagonalstäbe an den Ecken gegen die 45°-Risse.
 Diagonalzulagen erzeugt das Tool derzeit **nicht** (Roadmap v0.4).
 
+### Bürovorgaben als Defaults
+
+Aus deiner Palette übernommen: **Betondeckung 40 mm**, Mindeststablänge
+300 mm, „Als PythonPart erzeugen" aktiv, und die Bewehrungslayer nach
+eurem Standard — die IDs stammen aus deiner Deckenplatte-`.pyp`, die
+Bezeichnungen decken sich:
+
+| Parameter | Layer | ID |
+|---|---|---|
+| untere Lage X | RU_P_UNT_1 (Unten 1. Lage) | 7580 |
+| untere Lage Y | RU_P_UNT_2 (Unten 2. Lage) | 7586 |
+| obere Lage X | RU_P_OBE_4 (Oben 4. Lage) | 7583 |
+| obere Lage Y | RU_P_OBE_3 (Oben 3. Lage) | 7582 |
+| Randbügel links/rechts | RU_P_UNT_1_BGL | 64265 |
+| Randbügel unten/oben | RU_P_UNT_2_BGL | 64264 |
+
+Die **Betongüte** bleibt bewusst auf `-1` — das heisst „aus den
+Allplan-Projekteinstellungen übernehmen" und ergibt in deinem Projekt
+bereits C25/30. Ein fester Index wäre ohne laufendes Allplan nicht
+verlässlich zu bestimmen und würde die Projekteinstellung überstimmen.
+
 ### 7. Betondeckung — Nennwerte
 
 prSIA 262 Tabelle 18, planmässige Bewehrungsüberdeckung `c_nom` [mm]:
