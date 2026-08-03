@@ -16,7 +16,8 @@ keine Kopie kommerzieller Plugins.
 | v0.3 | ScriptObject-Struktur mit drei Eingabemodi (Rechteck-Drag / Polygon zeichnen / Element wählen), Scanline-Verlegung für polygonale Konturen, mehrere Öffnungen, Randverdichtung via `calculate_length_of_regions` | umgesetzt |
 | v0.3.3 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
 | v0.4 | Verlegekonzept über Rechteckzerlegung (Rechtecke je Lage, Stoss an jeder Verlegungsgrenze, Abtreppung am längsten Stab), Randbügel und Anschlusseisen auch im Polygon-/Elementmodus | umgesetzt |
-| v0.5 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Diagonalzulagen an Öffnungsecken | Roadmap |
+| v0.5 | Aussparungs-Werkzeug: automatisch erkennen / Polygon einzeichnen / Rechteck-Eingabe, Rand- und Diagonalzulagen um beliebige Aussparungspolygone | umgesetzt |
+| v0.6 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
 Original-Beispiele entwickelt und je Ausbaustufe von einem unabhängigen
@@ -40,8 +41,9 @@ PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modu
     slab_reinforcement.py                            ScriptObject (Eingabemodi) + Placement-Engine
     opening_clipping.py                              Reine Band-/Kapp-Logik Rechteckmodus (ohne Allplan, testbar)
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
+    opening_reinforcement.py                         Reine Geometrie der Aussparungsbewehrung (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
-tests/                                               80 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
+tests/                                               114 Unit-Tests der vier Geometriemodule (laufen ohne Allplan)
 tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
 tools/Sync-SlabReinforcement.ps1                     Sync GitHub → lokales Allplan-Verzeichnis (Windows)
 ```
@@ -80,7 +82,7 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
 
 ## Automatischer Abgleich GitHub → lokal (Windows)
 
-`tools/Sync-SlabReinforcement.ps1` holt die fünf benötigten Dateien direkt von
+`tools/Sync-SlabReinforcement.ps1` holt die benötigten Dateien direkt von
 `raw.githubusercontent.com` und schreibt sie in das Allplan-Benutzerverzeichnis.
 GitHub ist dabei die Quelle der Wahrheit — lokale Änderungen an diesen Dateien
 werden überschrieben. Geschrieben wird nur, wenn sich der Inhalt (SHA-256)
@@ -94,6 +96,7 @@ Abgeglichen werden:
 | `PythonPartsScripts/SlabReinforcement/slab_reinforcement.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `PythonPartsScripts/SlabReinforcement/contour_placement.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `PythonPartsScripts/SlabReinforcement/opening_clipping.py` | `PythonPartsScripts\SlabReinforcement\` |
+| `PythonPartsScripts/SlabReinforcement/opening_reinforcement.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `PythonPartsScripts/SlabReinforcement/lap_splitting.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `Library/SlabReinforcement/SlabReinforcement.pyp` | `Library\SlabReinforcement\` |
 
@@ -419,6 +422,56 @@ Daraus folgt weiter:
   einer Öffnung) oder der Stababstand wechselt. Rechtwinklige Bereiche
   bleiben ein einziges Placement.
 
+## Aussparungen
+
+Aussparungen sind ein eigenes Werkzeug mit drei Quellen — einstellbar über
+**`OpeningMode`** auf der Palettenseite *Aussparungen*:
+
+| Modus | Woher die Aussparungen kommen |
+| --- | --- |
+| **Automatisch erkennen** (Default) | Alle Innenkonturen der Eingabe. Beim Elementmodus sind das die Aussparungen der gewählten Decke bzw. des Fundaments, beim Polygonmodus jedes gezeichnete Polygon ausser dem flächengrössten. |
+| **Polygon einzeichnen** | Nach der Kontureingabe folgt eine **zweite Eingaberunde**: beliebig viele Aussparungspolygone werden gezeichnet, ESC beendet sie. Funktioniert in allen drei Eingabemodi, auch beim Rechteck-Drag. |
+| **Automatisch + Polygon** | Erkannte Innenkonturen **und** zusätzlich gezeichnete. |
+| **Rechteck (Eingabe)** | Die klassische Zahlen-Eingabe (X/Y/Breite/Länge). |
+| **Keine** | Aussparungen werden ignoriert, die Stäbe laufen durch. |
+
+`MinOpeningSize` (Default 150 mm) filtert automatisch erkannte
+Innenkonturen: alles, dessen kleinere Seite darunter liegt, ist in der
+Praxis ein Zeichnungsartefakt (doppelte Punkte, Rundungen) und keine
+Aussparung.
+
+Eine polygonale Aussparung im Rechteckmodus schaltet die Platte intern auf
+den Konturpfad um — die Bandlogik des Rechteckmodus kennt nur
+achsparallele Rechtecke, der Scanline-Pfad beliebige Polygone.
+
+### Bewehrung um die Aussparung
+
+Beides läuft über `opening_reinforcement.py` und funktioniert für
+**beliebige, auch schiefe** Aussparungspolygone:
+
+- **Randzulagen:** je Aussparungskante eine Schar Stäbe **parallel zu
+  dieser Kante**, erste Achse einen Stabdurchmesser von der Kante entfernt,
+  weitere im eingestellten Abstand nach aussen. Jeder Stab ragt um die
+  Übergreifungslänge über beide Ecken hinaus.
+- **Diagonalzulagen:** je Ecke Stäbe senkrecht zur Winkelhalbierenden, die
+  die Ecke überspannen — gegen den 45°-Riss, der von jeder einspringenden
+  Ecke ausgeht. Nur an echten Knicken (> 20°), ein Zwischenpunkt auf einer
+  geraden Kante erzeugt keine Diagonale.
+
+Jeder Zulagestab wird anschliessend an der Plattenkontur **und an allen
+anderen Aussparungen** abgeschnitten, mit derselben Deckungsregel wie die
+Hauptlagen (senkrecht zur geschnittenen Kante, an Schrägen `c / sin α`).
+Reststücke unter der Mindeststablänge entfallen.
+
+Die Höhenlage: Zulagen liegen **innerhalb** der Hauptlagen — unten
+oberhalb der inneren unteren Lage, oben unterhalb der inneren oberen Lage.
+Kanten mit geradem Index liegen in der einen, Kanten mit ungeradem Index
+in der nächsten Ebene darüber (bei einer rechteckigen Aussparung genau die
+beiden Hauptrichtungen), die Diagonalen in einer dritten. So durchdringen
+sich weder Zulagen untereinander noch Zulagen und Hauptlagen. Ist zwischen
+den Hauptlagen kein Platz mehr, entfällt die Ebene mit einer Meldung im
+Trace-Fenster statt zu kollidieren.
+
 **Betondeckung an der Schräge:** Die Deckung wird **senkrecht zur Kante**
 eingehalten. Bei einem Winkel α zwischen Stabachse und Kante ist der
 Rückversatz in Stabrichtung `c / sin α` — bei 45° also das 1.41-fache der
@@ -446,7 +499,7 @@ sind daher **konfigurierbarer Bürostandard, nicht normbelegt**. Verbreitete
 Praxis: mindestens die gekappte Querschnittsfläche je Richtung zulegen und
 die Zulagen um mindestens die Verankerungslänge über die Öffnungsecke
 hinausführen; zusätzlich Diagonalstäbe an den Ecken gegen die 45°-Risse.
-Diagonalzulagen erzeugt das Tool derzeit **nicht** (Roadmap v0.4).
+Beides erzeugt das Tool, beides ist über die Palette einstellbar.
 
 ### Bürovorgaben als Defaults
 

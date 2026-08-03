@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.4.6</Version>
+    <Version>0.5.0</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -394,26 +394,42 @@
   </Page>
   <Page>
     <Name>OpeningPage</Name>
-    <Text>Öffnung</Text>
+    <Text>Aussparungen</Text>
     <Parameters>
       <Parameter>
-        <Name>OpeningExpander</Name>
-        <Text>Rechteckige Öffnung</Text>
+        <Name>OpeningSourceExpander</Name>
+        <Text>Aussparungen</Text>
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>HasOpening</Name>
-            <Text>Öffnung berücksichtigen</Text>
-            <Value>False</Value>
-            <ValueType>CheckBox</ValueType>
+            <Name>OpeningMode</Name>
+            <Text>Ermittlung</Text>
+            <Value>Automatisch erkennen</Value>
+            <ValueList>Automatisch erkennen|Polygon einzeichnen|Automatisch + Polygon|Rechteck (Eingabe)|Keine</ValueList>
+            <ValueType>StringComboBox</ValueType>
           </Parameter>
+          <Parameter>
+            <Name>MinOpeningSize</Name>
+            <Text>Kleinste zu berücksichtigende Aussparung</Text>
+            <Value>150</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>OpeningMode != "Keine"</Visible>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
+        <Name>OpeningExpander</Name>
+        <Text>Rechteckige Aussparung (Eingabe)</Text>
+        <ValueType>Expander</ValueType>
+        <Visible>OpeningMode == "Rechteck (Eingabe)"</Visible>
+        <Parameters>
           <Parameter>
             <Name>OpeningX</Name>
             <Text>Abstand X vom Plattenursprung</Text>
             <Value>1500</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>HasOpening</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningY</Name>
@@ -421,7 +437,6 @@
             <Value>1200</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>HasOpening</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningWidth</Name>
@@ -429,7 +444,6 @@
             <Value>800</Value>
             <MinValue>100</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>HasOpening</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningHeight</Name>
@@ -437,15 +451,14 @@
             <Value>1000</Value>
             <MinValue>100</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>HasOpening</Visible>
           </Parameter>
         </Parameters>
       </Parameter>
       <Parameter>
         <Name>EdgeReinfExpander</Name>
-        <Text>Randverstärkung Öffnung</Text>
+        <Text>Randverstärkung Aussparung</Text>
         <ValueType>Expander</ValueType>
-        <Visible>HasOpening</Visible>
+        <Visible>OpeningMode != "Keine"</Visible>
         <Parameters>
           <Parameter>
             <Name>EdgeReinfActive</Name>
@@ -484,6 +497,52 @@
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
             <Visible>EdgeReinfActive</Visible>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
+        <Name>DiagonalExpander</Name>
+        <Text>Diagonalzulagen an den Ecken</Text>
+        <ValueType>Expander</ValueType>
+        <Visible>OpeningMode != "Keine"</Visible>
+        <Parameters>
+          <Parameter>
+            <Name>DiagonalActive</Name>
+            <Text>Diagonalzulagen erzeugen</Text>
+            <Value>True</Value>
+            <ValueType>CheckBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>DiagonalDiameter</Name>
+            <Text>Durchmesser</Text>
+            <Value>12</Value>
+            <ValueType>ReinfBarDiameter</ValueType>
+            <Visible>DiagonalActive</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>DiagonalCount</Name>
+            <Text>Stabanzahl je Ecke und Lage</Text>
+            <Value>1</Value>
+            <MinValue>1</MinValue>
+            <MaxValue>4</MaxValue>
+            <ValueType>Integer</ValueType>
+            <Visible>DiagonalActive</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>DiagonalLength</Name>
+            <Text>Stablänge</Text>
+            <Value>1500</Value>
+            <MinValue>200</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>DiagonalActive</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>DiagonalSpacing</Name>
+            <Text>Stababstand</Text>
+            <Value>100</Value>
+            <MinValue>25</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>DiagonalActive</Visible>
           </Parameter>
         </Parameters>
       </Parameter>
