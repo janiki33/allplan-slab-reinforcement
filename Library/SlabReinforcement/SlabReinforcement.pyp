@@ -3,12 +3,39 @@
   <Script>
     <Name>SlabReinforcement\SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.2</Version>
+    <Version>0.3</Version>
+    <ReadLastInput>True</ReadLastInput>
   </Script>
+  <Constants>
+    <Constant>
+      <Name>INPUT_MODE_INPUT</Name>
+      <Value>1</Value>
+      <ValueType>Integer</ValueType>
+    </Constant>
+    <Constant>
+      <Name>INPUT_MODE_CREATION</Name>
+      <Value>2</Value>
+      <ValueType>Integer</ValueType>
+    </Constant>
+  </Constants>
   <Page>
     <Name>GeometryPage</Name>
     <Text>Geometrie</Text>
     <Parameters>
+      <Parameter>
+        <Name>InputExpander</Name>
+        <Text>Eingabe</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>InputMethod</Name>
+            <Text>Eingabemodus</Text>
+            <Value>Rechteck (Drag)</Value>
+            <ValueList>Rechteck (Drag)|Polygon zeichnen|Element wählen</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
       <Parameter>
         <Name>GeometryExpander</Name>
         <Text>Plattenabmessungen</Text>
@@ -20,6 +47,7 @@
             <Value>5000</Value>
             <MinValue>500</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>InputMethod == "Rechteck (Drag)"</Visible>
           </Parameter>
           <Parameter>
             <Name>SlabWidth</Name>
@@ -27,6 +55,7 @@
             <Value>4000</Value>
             <MinValue>500</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>InputMethod == "Rechteck (Drag)"</Visible>
           </Parameter>
           <Parameter>
             <Name>SlabThickness</Name>
@@ -48,6 +77,28 @@
             <Value>X-Richtung</Value>
             <ValueList>X-Richtung|Y-Richtung</ValueList>
             <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>EdgeZonesActive</Name>
+            <Text>Randverdichtung</Text>
+            <Value>False</Value>
+            <ValueType>CheckBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>EdgeZoneLength</Name>
+            <Text>Zonenlänge</Text>
+            <Value>1000</Value>
+            <MinValue>100</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>EdgeZonesActive</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>EdgeZoneSpacing</Name>
+            <Text>Stababstand in der Zone</Text>
+            <Value>100</Value>
+            <MinValue>25</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>EdgeZonesActive</Visible>
           </Parameter>
         </Parameters>
       </Parameter>
@@ -484,6 +535,18 @@
             <ValueType>CheckBox</ValueType>
           </Parameter>
         </Parameters>
+      </Parameter>
+    </Parameters>
+  </Page>
+  <Page>
+    <Name>HiddenPage</Name>
+    <Text/>
+    <Parameters>
+      <Parameter>
+        <Name>InputMode</Name>
+        <Text>Input mode</Text>
+        <Value/>
+        <ValueType>Integer</ValueType>
       </Parameter>
     </Parameters>
   </Page>

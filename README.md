@@ -13,8 +13,8 @@ keine Kopie kommerzieller Plugins.
 | v0.1 | Rechteckplatte, 4 Lagen (Ø, Abstand, Deckung, Stahlgüte je Lage), Palette, Live-Vorschau, PythonPart-Erzeugung | umgesetzt |
 | v0.2 | Rechteckige Öffnung: Kappen der Hauptstäbe, umlaufende Randverstärkung mit konfigurierbarer Übergreifungslänge | umgesetzt |
 | v0.2.1 | Randausbildung je Kante (U-Randbügel / Anschlusseisen / separate Anschlusseisen / keine), Stoßfaktor, „Alle Lagen gleich", wählbare äußere Lagenrichtung, Allplan-Layer je Lage, Handles | umgesetzt |
-| v0.3 | Polygonale Platten (Interactor-Eingabe / Slab-Selektion), mehrere Öffnungen | Roadmap, s. u. |
-| v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
+| v0.3 | ScriptObject-Struktur mit drei Eingabemodi (Rechteck-Drag / Polygon zeichnen / Element wählen), Scanline-Verlegung für polygonale Konturen, mehrere Öffnungen, Randverdichtung via `calculate_length_of_regions` | umgesetzt |
+| v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Randbügel/Anschlusseisen an Polygonkanten | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
 Original-Beispiele entwickelt und von einem unabhängigen Review gegen die
@@ -26,9 +26,10 @@ aber noch nicht in einer laufenden Allplan-Installation getestet.
 ```
 Library/SlabReinforcement/SlabReinforcement.pyp      Palettendefinition (UI)
 PythonPartsScripts/SlabReinforcement/
-    SlabReinforcement.py                             Einstieg + Orchestrierung der Placements
-    opening_clipping.py                              Reine Band-/Kapp-Logik (ohne Allplan-Import, testbar)
-tests/test_opening_clipping.py                       Unit-Tests der Kapp-Logik (laufen ohne Allplan)
+    SlabReinforcement.py                             ScriptObject (Eingabemodi) + Placement-Engine
+    opening_clipping.py                              Reine Band-/Kapp-Logik Rechteckmodus (ohne Allplan, testbar)
+    contour_placement.py                             Reine Scanline-Logik für polygonale Konturen (ohne Allplan, testbar)
+tests/                                               Unit-Tests beider Geometrie-Module (laufen ohne Allplan)
 ```
 
 ## Installation
@@ -44,9 +45,30 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
 
 ## Bedienung / Parameter
 
-- **Geometrie:** Länge/Breite/Dicke der (vorerst rechteckigen) Platte,
-  dazu Handles am Plattenursprung für Länge/Breite/Dicke. Unter „Verlegung"
-  ist wählbar, ob die X- oder die Y-Lagen außen liegen.
+- **Eingabemodus** (Seite „Geometrie"):
+  - *Rechteck (Drag):* Platte mit der Maus absetzen (Vorschau folgt dem
+    Fadenkreuz), danach über Handles Länge/Breite/Dicke ziehen. Voller
+    Funktionsumfang inkl. Palettenöffnung, Randbügeln und Anschlusseisen.
+  - *Polygon zeichnen:* beliebige Kontur zeichnen; jedes weitere
+    gezeichnete Polygon wird als Öffnung interpretiert (größte Fläche =
+    Kontur). Verlegung per Scanline: Stablinien werden mit der Kontur und
+    allen Öffnungen verschnitten, gleiche aufeinanderfolgende Stäbe zu
+    linearen Placements zusammengefasst, an schrägen Rändern entstehen
+    Einzelstab-Placements.
+  - *Element wählen:* Decke (`Slab`), Boden-/Plattenfundament
+    (`SlabFoundationTier`), Einzelfundament (`IndividualFoundation`) oder
+    Streifenfundament (`StripFoundation`) wählen. Kontur kommt aus
+    `GetGeometryObject()` (beim Streifenfundament aus Achse × Breite);
+    Dicke und Unterkanten-Höhenlage werden, wo lesbar
+    (Tier-Properties/`Height`/`PlaneReferences`), aus dem Element
+    übernommen, sonst gilt der Palettenwert mit Meldung im Trace-Fenster.
+- **Geometrie:** Länge/Breite/Dicke (Rechteckmodus), Handles am
+  Absetzpunkt. Unter „Verlegung" ist wählbar, ob die X- oder die Y-Lagen
+  außen liegen; dort sitzt auch die **Randverdichtung** (Zonenlänge +
+  engerer Stababstand an beiden Verteilrändern): im Rechteckmodus über
+  `LinearBarBuilder.calculate_length_of_regions`, im Scanline-Modus über
+  eine äquivalente Positionsberechnung. Verdichtungszonen wirken im
+  Rechteckmodus nur auf Bänder über die volle Plattenbreite.
 - **Bewehrung unten / oben:** je Richtung Durchmesser, Stababstand,
   Betondeckung und Stahlgüte. Mit „Alle Lagen gleicher Durchmesser" gilt
   eine gemeinsame ø/a-Eingabe für alle vier Lagen.
@@ -60,11 +82,16 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
   Stoßfaktor (Vielfaches von ø) konfigurierbar — bewusst kein Normwert.
   Randbügel und separate Anschlusseisen sparen den Bereich einer Öffnung
   aus, wenn diese den jeweiligen Randstreifen schneidet. Bekannte
-  Einschränkungen: Bei aktiver Öffnung starten die Hauptlagen-Bänder ihr
-  Raster je Band neu, sodass Randbügel/Anschlusseisen dort nicht zwingend
-  mit den Lagenstäben fluchten; die Format-Eigenschaften (Stift/Farbe)
-  wirken auf den Plattenkörper, die Bewehrung übernimmt die globalen
-  Eigenschaften (bzw. den je Lage gewählten Layer).
+  Einschränkungen: Randbügel/Anschlusseisen gibt es nur im Rechteckmodus
+  (an freien Polygonkanten: Roadmap v0.4); bei aktiver Öffnung starten die
+  Hauptlagen-Bänder ihr Raster je Band neu, sodass Randbügel/Anschluss-
+  eisen dort nicht zwingend mit den Lagenstäben fluchten; die Format-
+  Eigenschaften (Stift/Farbe) wirken auf den Plattenkörper, die Bewehrung
+  übernimmt die globalen Eigenschaften (bzw. den je Lage gewählten Layer).
+  Im Polygon-/Elementmodus wird als Ansichtsgeometrie die Kontur (kein
+  3D-Körper) gezeichnet; beim Elementmodus existiert der Körper ohnehin.
+  Die seitliche Deckung wird im Scanline-Pfad achsparallel angesetzt — an
+  stark schrägen Rändern ist die wahre (senkrechte) Deckung etwas kleiner.
 - **Öffnung:** eine rechteckige Öffnung über Lage und Abmessung; Zulagen
   (Anzahl, Ø, Abstand) und Übergreifungslänge sind frei konfigurierbar.
 - **Allgemein:** Betongüte, seitliche Deckung, Mindeststablänge (kürzere
@@ -125,18 +152,31 @@ Branch `2026`) und die 2026-Doku verifiziert:
 - **Palette:** `.pyp`-Schema 2026 mit `ReinfBarDiameter`, `ReinfSteelGrade`,
   `ReinfConcreteGrade`, `ReinfConcreteCover`, `Expander`, `Visible`-Bedingungen —
   Vorlagen `BarPlacement.pyp`, `PaletteExamples/AllControls.pyp` (Branch 2026).
-- **Polygonale Platzierung (für v0.3):** `AllplanReinf.BarPlacement(pos, count,
-  start_shape, end_shape)` interpoliert linear zwischen zwei Shapes
-  ([BarPlacement-Stub 2026](https://pythonparts.allplan.com/2026/api_reference/InterfaceStubs/NemAll_Python_Reinforcement/BarPlacement/),
-  Beispiel `PolygonalPlacement.py`); für unregelmäßige Konturen zeigt
-  `ReinforcementExamples/AreaPlacementExpand.py` das Muster
-  „Stablinie gegen jede Polygonkante mit `AllplanGeo.IntersectionCalculus` schneiden".
-- **Geometrie-Eingabe (für v0.3):** `ScriptObjectInteractors.PolygonInteractor`
-  (Polygon zeichnen) bzw. `SingleElementSelectInteractor` +
-  `SlabElement.GetGeometryObject()` (bestehende Platte wählen) — Beispiele
-  `ArchitectureExamples/Objects/SlabOpening.py`, `ModifyObjects/ModifySlab.py`.
-  Erfordert die Umstellung des Skripts auf die `ScriptObject`-Struktur
-  (`create_script_object` / `BaseScriptObject`).
+- **ScriptObject-Struktur (v0.3):** `create_script_object` /
+  `BaseScriptObject` mit `start_input` → `start_next_input` → `execute`,
+  Eingabezustand über `<Constants>` + verstecktes `InputMode`-Feld,
+  `on_cancel_function` mit Favoriten-Speicherung — Muster 1:1 aus
+  `ArchitectureExamples/Objects/SlabOpening.py` (Branch 2026).
+- **Geometrie-Eingabe (v0.3):** `ScriptObjectInteractors.PolygonInteractor`
+  (Polygon zeichnen, `multi_polygon_input=True`), `PointInteractor` mit
+  Preview-Callback (Rechteck-Drag), `SingleElementSelectInteractor` mit den
+  Typ-UUIDs `Slab_TypeUUID`, `SlabFoundationTier_TypeUUID`,
+  `IndividualFoundation_TypeUUID`, `StripFoundation_TypeUUID` — Beispiele
+  `SlabOpening.py`, `Slab.py`, `ModifySlab.py`, `ModifyStripFoundation.py`,
+  `ModifyBlockFoundation.py`, `ModifySlabFoundation.py`. Dicke über
+  `GetSlabTierProperties(i).Thickness`, Streifenfundament-Geometrie ist die
+  Achse (`GetGeometryObject()` → Linie).
+- **Scanline statt Shape-Interpolation:** Die polygonale
+  `BarPlacement`-Variante (Start-/End-Shape mit Interpolation,
+  `PolygonalPlacement.py`) eignet sich für stetig veränderliche Shapes;
+  für beliebige Konturen mit Öffnungen nutzt v0.3 stattdessen das
+  Scanline-Muster aus `ReinforcementExamples/AreaPlacementExpand.py`
+  (Stablinie gegen Kontur schneiden) — als reine, testbare
+  Python-Implementierung in `contour_placement.py`.
+- **Wechselnde Abstände:** `LinearBarBuilder.calculate_length_of_regions(
+  value_list, from_pnt, to_pnt, cover_l, cover_r)` mit
+  `value_list = [(Zonenlänge, Abstand, Ø), (0, Abstand, Ø), ...]` —
+  [Doku 2026](https://pythonparts.allplan.com/2026/api_reference/StdReinfShapeBuilder/LinearBarPlacementBuilder/).
 
 ### Versionsunterschiede 2024/2025/2026
 
