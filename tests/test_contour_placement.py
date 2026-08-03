@@ -7,7 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScripts' / 'SlabReinforcement'))
 
-from contour_placement import (_round_outward, bar_parallel_breaks,
+from contour_placement import (LONGEST, SHORTEST, _round_outward,
+                               bar_parallel_breaks,
                                compute_contour_bars, decompose_into_zones,
                                edge_setback, group_bars_into_runs,
                                group_bars_into_steps, loop_area, loop_bbox,
@@ -347,7 +348,9 @@ class DecompositionTest(unittest.TestCase):
             if not own:
                 continue
 
-            self.assertLessEqual(built_from, min(own) + 1e-6)
+            # bis zum längsten Stab, aber nie darüber hinaus (sonst wäre
+            # die seitliche Deckung schon durch die Rundung verletzt)
+            self.assertGreaterEqual(built_from, min(own) - 1e-6)
             # und nicht am kürzesten Stab abgeschnitten
             self.assertLess(built_from, max(own) + 1e-6)
 
@@ -366,7 +369,7 @@ class DecompositionTest(unittest.TestCase):
                     # Stufe darf den Stab verlängern, aber nur begrenzt
                     # (zusätzlich bis zu einem Raster je Ende durch die Rundung)
                     overshoot = max(own_from - built[0], 0) + max(built[1] - own_to, 0)
-                    self.assertLessEqual(overshoot, deviation + 2 * raster + 1e-6)
+                    self.assertLessEqual(overshoot, deviation + 1e-6)
 
     def test_round_outward_never_shortens(self):
         self.assertEqual(_round_outward((1050, 1560), 100), (1000, 1600))
@@ -473,6 +476,66 @@ class EdgeExtensionTest(unittest.TestCase):
         self.assertEqual(compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0),
                          compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
                                               edge_extensions={}))
+
+
+class StepReferenceTest(unittest.TestCase):
+    """Stufenlänge am längsten oder am kürzesten Stab."""
+
+    CONTOUR = [(0, 0), (3000, 0), (5000, 2000), (5000, 4000), (0, 4000)]
+
+    def _zones(self, reference):
+        bars = compute_contour_bars(self.CONTOUR, [], 0, 150, 30, 300,
+                                    dist_margin=34)
+
+        return bars, decompose_into_zones(bars, self.CONTOUR, 0,
+                                          max_step_deviation=250,
+                                          length_raster=50,
+                                          min_bar_length=300,
+                                          step_reference=reference)
+
+    def test_shortest_keeps_every_bar_inside_the_concrete(self):
+        bars, zones = self._zones(SHORTEST)
+        available = {bar.position: bar.segments for bar in bars}
+
+        for zone in zones:
+            for i, built in enumerate(zone.segments[0]):
+                for position in zone.positions:
+                    own = available.get(position, ())
+
+                    if i >= len(own):
+                        continue
+
+                    self.assertGreaterEqual(built[0], own[i][0] - 1e-6)
+                    self.assertLessEqual(built[1], own[i][1] + 1e-6)
+
+    def test_longest_does_extend_beyond_the_concrete(self):
+        bars, zones = self._zones(LONGEST)
+        available = {bar.position: bar.segments for bar in bars}
+
+        overshoots = [built[1] - own[i][1]
+                      for zone in zones if zone.kind == 'step'
+                      for i, built in enumerate(zone.segments[0])
+                      for position in zone.positions
+                      for own in [available.get(position, ())]
+                      if i < len(own)]
+
+        self.assertTrue(any(value > 1.0 for value in overshoots))
+
+    def test_raster_never_grows_past_the_reference_bar(self):
+        for reference in (LONGEST, SHORTEST):
+            bars, zones = self._zones(reference)
+            widest = {bar.position: bar.segments for bar in bars}
+
+            for zone in zones:
+                for i, built in enumerate(zone.segments[0]):
+                    own = [widest[p][i] for p in zone.positions
+                           if p in widest and i < len(widest[p])]
+
+                    if not own:
+                        continue
+
+                    self.assertGreaterEqual(built[0], min(lo for lo, _ in own) - 1e-6)
+                    self.assertLessEqual(built[1], max(hi for _, hi in own) + 1e-6)
 
 
 class ParallelEdgeCoverTest(unittest.TestCase):

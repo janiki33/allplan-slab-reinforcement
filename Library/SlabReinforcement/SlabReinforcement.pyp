@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.4.4</Version>
+    <Version>0.4.5</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -108,8 +108,15 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
+            <Name>StepReference</Name>
+            <Text>Stufe vermessen an</Text>
+            <Value>Kürzestes Eisen</Value>
+            <ValueList>Kürzestes Eisen|Längstes Eisen</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
             <Name>StepMaxLoss</Name>
-            <Text>Max. Verkürzung je Stab</Text>
+            <Text>Max. Längenabweichung je Stab</Text>
             <Value>250</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>

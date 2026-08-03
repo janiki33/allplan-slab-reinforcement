@@ -130,6 +130,8 @@ apply_boundary_laps = _contour_placement.apply_boundary_laps
 loop_area = _contour_placement.loop_area
 loop_bbox = _contour_placement.loop_bbox
 split_closed_loops = _contour_placement.split_closed_loops
+LONGEST = _contour_placement.LONGEST
+SHORTEST = _contour_placement.SHORTEST
 
 split_with_preferred_joints = _lap_splitting.split_with_preferred_joints
 
@@ -143,7 +145,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.4.4'
+SCRIPT_VERSION = '0.4.5'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -556,6 +558,13 @@ class SlabReinforcement():
         # Abtreppung an schrägen Rändern
         self.step_max_loss = build_ele.StepMaxLoss.value
         self.step_length_raster = build_ele.StepLengthRaster.value
+
+        # Woran wird die Länge einer Abtreppungsstufe gemessen? Am längsten
+        # Stab ragen die kürzeren um bis zu StepMaxLoss über ihre eigene
+        # Länge hinaus — also in die seitliche Deckung hinein. Am kürzesten
+        # bleibt jeder Stab im Beton.
+        self.step_reference = SHORTEST \
+            if build_ele.StepReference.value == 'Kürzestes Eisen' else LONGEST
         self.max_edge_setback = build_ele.MaxEdgeSetback.value
 
         # Variante A: Rechteckgrenzen fluchten über die Bänder hinweg,
@@ -1323,39 +1332,59 @@ class SlabReinforcement():
         return max(int(outer / 10.0) * 10.0 - layer.diameter, 0.0)
 
 
-    def _hook_edges(self, layer: LayerConfig) -> list[tuple[float, float, float]]:
+    def _hook_edges(self, layer: LayerConfig) -> list[tuple[tuple, tuple]]:
         """Kanten, an denen die Stäbe dieser Lage angebogen werden.
 
         Angebogen wird nur an den unteren Lagen (1. und 2. Lage) und nur an
-        Kanten, auf die die Stäbe senkrecht zulaufen.
+        Kanten, in die die Stäbe hineinlaufen — Kanten parallel zur
+        Stabrichtung scheiden aus. Schrägen sind ausdrücklich dabei: dort
+        entsteht die Abtreppung, und auch deren Stäbe brauchen einen
+        Abschlussbügel.
 
         Returns:
-            Liste (Koordinate auf der Stabachse, Ausdehnung der Kante von,
-            Ausdehnung der Kante bis) — die Ausdehnung begrenzt den Bügel
-            auf den tatsächlichen Randbereich.
+            Liste (Startpunkt, Endpunkt) der Kante als 2D-Tupel.
         """
 
         if self.stirrup_style == 'Einzeln' or layer.is_top or not self.contour:
             return []
 
-        run_axis = 0 if layer.direction == 'X' else 1
-        dist_axis = 1 - run_axis
+        dist_axis = 1 if layer.direction == 'X' else 0
 
         edges = []
 
-        for _, option, _, start, end, axis_parallel in self._contour_edges():
-            if option != SIDE_STIRRUP or not axis_parallel:
+        for _, option, _, start, end, _ in self._contour_edges():
+            if option != SIDE_STIRRUP:
                 continue
 
-            # Kante muss senkrecht zur Stabrichtung liegen
-            if abs(end[run_axis] - start[run_axis]) > 1.0:
+            # Kante parallel zur Stabrichtung -> der Stab läuft nicht hinein
+            if abs(end[dist_axis] - start[dist_axis]) < 1.0:
                 continue
 
-            edges.append((start[run_axis],
-                          min(start[dist_axis], end[dist_axis]),
-                          max(start[dist_axis], end[dist_axis])))
+            edges.append((start, end))
 
         return edges
+
+
+    def _edge_run_at(self, edge: tuple[tuple, tuple], position: float,
+                     run_axis: int) -> float | None:
+        """Koordinate auf der Stabachse, an der die Kante die Scanlinie bei
+        position schneidet — None, wenn die Kante dort nicht liegt.
+        """
+
+        dist_axis = 1 - run_axis
+        start, end = edge
+
+        d1, d2 = start[dist_axis], end[dist_axis]
+
+        if abs(d2 - d1) < 1e-9:
+            return None
+
+        if not (min(d1, d2) - 1.0 <= position <= max(d1, d2) + 1.0):
+            return None
+
+        t = (position - d1) / (d2 - d1)
+
+        return start[run_axis] + t * (end[run_axis] - start[run_axis])
 
 
     def _piece_hooks(self,
@@ -1364,10 +1393,12 @@ class SlabReinforcement():
                      positions: list[float]) -> tuple[float, float]:
         """Bügelschenkel für die beiden Enden eines Teilstabes.
 
-        Ein Ende bekommt nur dann einen Bügel, wenn es tatsächlich auf einer
-        Randkante liegt — also sowohl in Stabrichtung als auch quer dazu im
-        Bereich dieser Kante. Damit entstehen die Bügel nur am Rand und
-        nicht bei zufällig gleicher Koordinate mitten in der Platte.
+        Ein Ende bekommt einen Bügel, wenn es an einer Randkante endet — im
+        rechtwinkligen Fall genau um die Deckung davor, in einer
+        Abtreppung um zusätzlich bis zu einer Stufe (Verkürzung + Raster)
+        zurückversetzt. Geprüft wird gegen die tatsächliche Kantenlage an
+        den Scan-Positionen der Verlegung, damit auch Schrägen greifen und
+        ein Stoss mitten in der Platte keinen Bügel bekommt.
         """
 
         edges = self._hook_edges(layer)
@@ -1376,13 +1407,23 @@ class SlabReinforcement():
         if not edges or hook <= 0:
             return (0.0, 0.0)
 
-        tol = self.cover_side + 1.0
-        span_from, span_to = positions[0], positions[-1]
+        run_axis = 0 if layer.direction == 'X' else 1
+
+        # Rückversatz, den ein Stabende gegenüber der Kante haben darf:
+        # Deckung (an der Schräge cover/sin, begrenzt durch MaxEdgeSetback)
+        # plus die Stufengrösse der Abtreppung
+        tol = max(self.cover_side, self.max_edge_setback) \
+            + self.step_max_loss + self.step_length_raster + 1.0
 
         def hooked(value: float) -> bool:
-            return any(abs(value - coord) <= tol and
-                       edge_from - tol <= span_to and span_from <= edge_to + tol
-                       for coord, edge_from, edge_to in edges)
+            for edge in edges:
+                for position in positions:
+                    edge_run = self._edge_run_at(edge, position, run_axis)
+
+                    if edge_run is not None and abs(value - edge_run) <= tol:
+                        return True
+
+            return False
 
         return (hook if hooked(piece[0]) else 0.0,
                 hook if hooked(piece[1]) else 0.0)
@@ -1719,7 +1760,8 @@ class SlabReinforcement():
                                      max_step_deviation=self.step_max_loss,
                                      length_raster=self.step_length_raster,
                                      min_bar_length=min_bar_length,
-                                     snap_to_contour=self.snap_rect_to_contour)
+                                     snap_to_contour=self.snap_rect_to_contour,
+                                     step_reference=self.step_reference)
 
         # Schritt 2: Übergreifung an jeder Verlegungsgrenze längs der Stäbe
         zones = apply_boundary_laps(zones, self.overlap_factor * layer.diameter)

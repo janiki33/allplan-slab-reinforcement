@@ -16,6 +16,9 @@ from __future__ import annotations
 import math
 from typing import NamedTuple
 
+LONGEST = 'longest'
+SHORTEST = 'shortest'
+
 Point = tuple[float, float]
 Loop = list[Point]
 Interval = tuple[float, float]
@@ -605,7 +608,8 @@ def decompose_into_zones(bars: list[ContourBar],
                          max_step_deviation: float,
                          length_raster: float = 0.0,
                          min_bar_length: float = 0.0,
-                         snap_to_contour: bool = True) -> list[PlacementZone]:
+                         snap_to_contour: bool = True,
+                         step_reference: str = LONGEST) -> list[PlacementZone]:
     """Zerlegt die Stablinien in Rechteck- und Abtreppungszonen.
 
     Je zusammenhängendem Bereich (zwischen zwei Sprungstellen) wird der
@@ -670,7 +674,8 @@ def decompose_into_zones(bars: list[ContourBar],
 
         if remainder:
             zones += _steps_from_bars(remainder, max_step_deviation,
-                                      length_raster, min_bar_length)
+                                      length_raster, min_bar_length,
+                                      reference=step_reference)
 
     return zones
 
@@ -679,23 +684,40 @@ def _steps_from_bars(bars: list[ContourBar],
                      max_step_deviation: float,
                      length_raster: float,
                      min_bar_length: float,
-                     tol: float = 1.0) -> list[PlacementZone]:
-    """Abtreppung: Stäbe werden zu Stufen gruppiert und **am längsten Stab
-    der Stufe** vermessen (nicht am kürzesten).
+                     tol: float = 1.0,
+                     reference: str = LONGEST) -> list[PlacementZone]:
+    """Abtreppung: Stäbe werden zu Stufen gruppiert; alle Stäbe einer Stufe
+    haben dieselbe Länge.
 
-    Eine Stufe wächst, solange kein Stab dadurch mehr als
-    max_step_deviation über seine eigene geometrische Länge hinausragt.
+    reference bestimmt, woran diese Länge gemessen wird:
+        LONGEST  — am **längsten** Stab der Stufe. Die kürzeren Stäbe
+                   ragen dann um bis zu max_step_deviation über ihre
+                   eigene geometrische Länge hinaus, also in die
+                   seitliche Betondeckung hinein und darüber hinaus.
+        SHORTEST — am **kürzesten** Stab der Stufe. Kein Stab verlässt
+                   den Beton; die längeren werden um bis zu
+                   max_step_deviation verkürzt.
+
+    Das Längenraster wird in beiden Fällen **nach innen** gerundet — ein
+    Stab darf nie über den Referenzstab hinauswachsen, sonst wäre die
+    seitliche Deckung schon durch die Rundung verletzt.
     """
 
     def enclosing(group: list[ContourBar]) -> tuple[Interval, ...]:
         count = len(group[0].segments)
+
+        if reference == SHORTEST:
+            return tuple((max(bar.segments[i][0] for bar in group),
+                          min(bar.segments[i][1] for bar in group))
+                         for i in range(count))
+
         return tuple((min(bar.segments[i][0] for bar in group),
                       max(bar.segments[i][1] for bar in group))
                      for i in range(count))
 
     def worst_overshoot(group: list[ContourBar], unified: tuple[Interval, ...]) -> float:
-        return max((bar.segments[i][0] - unified[i][0]) +
-                   (unified[i][1] - bar.segments[i][1])
+        return max(abs(bar.segments[i][0] - unified[i][0]) +
+                   abs(unified[i][1] - bar.segments[i][1])
                    for bar in group for i in range(len(unified)))
 
     zones: list[PlacementZone] = []
@@ -708,7 +730,7 @@ def _steps_from_bars(bars: list[ContourBar],
         unified = enclosing(group)
 
         if length_raster > 0:
-            unified = tuple(_round_outward(seg, length_raster) for seg in unified)
+            unified = tuple(_round_inward(seg, length_raster) for seg in unified)
 
         unified = tuple(seg for seg in unified if seg[1] - seg[0] >= min_bar_length)
 

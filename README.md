@@ -390,17 +390,28 @@ prSIA 262 und in der Verarbeitungsrichtlinie). Das Tool verwendet daher
 eine klar definierte, konfigurierbare **Bürostandard-Regel**:
 
 > Aufeinanderfolgende Stäbe bilden eine Stufe, solange **kein Stab der
-> Stufe dadurch mehr als `StepMaxLoss` über seine geometrische Länge
-> hinausragt** (Default 250 mm). Alle Stäbe einer Stufe erhalten dieselbe
-> Länge, vermessen am **längsten** Stab der Stufe: Anfang = kleinster
-> Anfang, Ende = grösstes Ende.
+> Stufe dadurch mehr als `StepMaxLoss` von seiner geometrischen Länge
+> abweicht** (Default 250 mm). Alle Stäbe einer Stufe erhalten dieselbe
+> Länge.
 
-Daraus folgt unmittelbar:
+Woran diese Länge gemessen wird, ist eine Entscheidung mit einem
+unvermeidlichen Zielkonflikt — deshalb die Palettenoption
+**`StepReference`**:
 
-- Die Stäbe folgen der Schräge so eng wie möglich; das Längenraster
-  `StepLengthRaster` (Default 50 mm) rundet passend **nach aussen**.
-- Der Überstand über die theoretische Kontur ist durch `StepMaxLoss`
-  begrenzt (zuzüglich bis zu einem Raster je Ende).
+| Einstellung | Länge der Stufe | Folge |
+| --- | --- | --- |
+| **Kürzestes Eisen** (Default) | Schnittmenge aller Stäbe | Kein Stab verlässt den Beton, die seitliche Deckung ist überall eingehalten. Die längeren Stäbe verlieren bis zu `StepMaxLoss` an Verankerungslänge. |
+| **Längstes Eisen** | Hülle aller Stäbe | Die Stufe folgt der Schräge so eng wie möglich. Die kürzeren Stäbe ragen dafür um bis zu `StepMaxLoss` über ihre eigene Länge hinaus — also **in die seitliche Deckung hinein und darüber hinaus**. |
+
+Beides zugleich geht nicht: eine Verlegung hat genau eine Stablänge. Wer
+die Stufe am längsten Stab vermisst, akzeptiert damit, dass die kürzeren
+Stäbe über die Betonkante hinauslaufen; `StepMaxLoss` begrenzt, wie weit.
+
+Daraus folgt weiter:
+
+- Das Längenraster `StepLengthRaster` (Default 50 mm) rundet **nach
+  innen**. Ein Stab darf nie über den Referenzstab hinauswachsen, sonst
+  wäre die seitliche Deckung schon durch die Rundung verletzt.
 - Ein grösserer Wert ergibt weniger, dafür gröbere Stufen — bei 45° und
   15 cm Stababstand liefert der Default 2 Stäbe je Stufe und 30 cm
   Längensprung.
