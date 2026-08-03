@@ -142,7 +142,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.4.1'
+SCRIPT_VERSION = '0.4.2'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -523,7 +523,21 @@ class SlabReinforcement():
         self.width = build_ele.SlabWidth.value
         self.thickness = thickness_override or build_ele.SlabThickness.value
 
-        self.concrete_cover = build_ele.ConcreteCover.value
+        # Betondeckung: entweder ein Wert für alles oder getrennt nach
+        # unten (UK Decke bis Aussenkante 1. Lage), oben (OK Decke bis
+        # Aussenkante 4. Lage) und seitlich (Stabenden)
+        if build_ele.CoverMode.value == 'Getrennt':
+            self.cover_bottom = build_ele.CoverBottom.value
+            self.cover_top = build_ele.CoverTop.value
+            self.cover_side = build_ele.CoverSide.value
+        else:
+            self.cover_bottom = self.cover_top = self.cover_side = \
+                build_ele.ConcreteCover.value
+
+        # Seitliche Deckung wirkt auf die Stabenden und Verlegeränder
+        self.concrete_cover = self.cover_side
+
+        self.stirrup_style = build_ele.StirrupStyle.value
         self.concrete_grade = build_ele.ConcreteGrade.value
 
         # Seitenausbildung und Stoßlänge (als Vielfaches des Stabdurchmessers)
@@ -629,8 +643,6 @@ class SlabReinforcement():
         # liegt direkt auf bzw. unter der Betondeckung, die innere darüber
         # bzw. darunter. Eine einzige Betondeckung gilt für alle Lagen und
         # für die Stabenden (Seitendeckung).
-        cover = self.concrete_cover
-
         if build_ele.OuterLayerDirection.value == 'X-Richtung':
             bottom_outer, bottom_inner = bottom_x, bottom_y
             top_outer, top_inner = top_x, top_y
@@ -638,10 +650,14 @@ class SlabReinforcement():
             bottom_outer, bottom_inner = bottom_y, bottom_x
             top_outer, top_inner = top_y, top_x
 
-        bottom_outer.z_axis = cover + bottom_outer.diameter / 2.0
-        bottom_inner.z_axis = cover + bottom_outer.diameter + bottom_inner.diameter / 2.0
-        top_outer.z_axis = self.thickness - cover - top_outer.diameter / 2.0
-        top_inner.z_axis = self.thickness - cover - top_outer.diameter - top_inner.diameter / 2.0
+        # unten: Deckung bis Aussenkante der 1. Lage, die 2. Lage liegt
+        # darüber; oben spiegelbildlich ab Aussenkante der 4. Lage
+        bottom_outer.z_axis = self.cover_bottom + bottom_outer.diameter / 2.0
+        bottom_inner.z_axis = self.cover_bottom + bottom_outer.diameter + \
+            bottom_inner.diameter / 2.0
+        top_outer.z_axis = self.thickness - self.cover_top - top_outer.diameter / 2.0
+        top_inner.z_axis = self.thickness - self.cover_top - top_outer.diameter - \
+            top_inner.diameter / 2.0
 
         layers = [bottom_outer, bottom_inner, top_inner, top_outer]
 
@@ -808,7 +824,9 @@ class SlabReinforcement():
                                    layer: LayerConfig,
                                    length: float,
                                    cover_start: float,
-                                   cover_end: float) -> AllplanReinf.BendingShape:
+                                   cover_end: float,
+                                   start_hook: float = -1.0,
+                                   end_hook: float = -1.0) -> AllplanReinf.BendingShape:
         """Gerader Stab in Lagenrichtung.
 
         Deckungsmodell wie im Deckenplatte-PythonPart des Anwenders: Die
@@ -826,13 +844,14 @@ class SlabReinforcement():
         cover_props = ConcreteCoverProperties(cover_start, cover_end, 0.0, 0.0)
 
         # start_hook/end_hook = -1: keine Haken (der Default 0 würde Haken
-        # mit automatisch berechneter Länge erzeugen)
+        # mit automatisch berechneter Länge erzeugen). Ein positiver Wert
+        # biegt den Randbügel direkt an den Stab an.
         return GeneralShapeBuilder.create_longitudinal_shape_with_hooks(length,
                                                                         model_angles,
                                                                         self._shape_props(layer),
                                                                         cover_props,
-                                                                        start_hook=-1,
-                                                                        end_hook=-1)
+                                                                        start_hook=start_hook,
+                                                                        end_hook=end_hook)
 
 
     # ==================== Rechteckmodus ====================
@@ -1285,6 +1304,75 @@ class SlabReinforcement():
         return placements
 
 
+    def _hook_length(self, layer: LayerConfig) -> float:
+        """Schenkellänge des angebogenen Randbügels.
+
+        Entspricht dem Achsmass des einzelnen U-Bügels: Aussenmass über
+        beide Lagen derselben Richtung, auf ganze cm abgerundet, minus
+        Stabdurchmesser.
+        """
+
+        partners = [item for item in self.layers if item.direction == layer.direction]
+
+        bottom = next((item for item in partners if not item.is_top), None)
+        top = next((item for item in partners if item.is_top), None)
+
+        if bottom is None or top is None:
+            return 0.0
+
+        outer = (top.z_axis + top.diameter / 2.0) - (bottom.z_axis - bottom.diameter / 2.0)
+
+        return max(int(outer / 10.0) * 10.0 - layer.diameter, 0.0)
+
+
+    def _hook_coordinates(self, layer: LayerConfig) -> list[float]:
+        """Koordinaten der Kanten, an denen die Stäbe dieser Lage angebogen
+        werden.
+
+        Angebogen wird nur an den unteren Lagen (1. und 2. Lage) und nur an
+        Kanten, auf die die Stäbe senkrecht zulaufen.
+        """
+
+        if self.stirrup_style == 'Einzeln' or layer.is_top or not self.contour:
+            return []
+
+        run_axis = 0 if layer.direction == 'X' else 1
+        coordinates = []
+
+        for _, option, _, start, end, axis_parallel in self._contour_edges():
+            if option != SIDE_STIRRUP or not axis_parallel:
+                continue
+
+            # Kante muss senkrecht zur Stabrichtung liegen
+            if abs(end[run_axis] - start[run_axis]) > 1.0:
+                continue
+
+            coordinates.append(start[run_axis])
+
+        return coordinates
+
+
+    def _piece_hooks(self,
+                     layer: LayerConfig,
+                     piece: tuple[float, float]) -> tuple[float, float]:
+        """Hakenlängen für die beiden Enden eines Teilstabes."""
+
+        coordinates = self._hook_coordinates(layer)
+
+        if not coordinates:
+            return (-1.0, -1.0)
+
+        hook = self._hook_length(layer)
+
+        if hook <= 0:
+            return (-1.0, -1.0)
+
+        tol = self.cover_side + 1.0
+
+        return (hook if any(abs(piece[0] - value) <= tol for value in coordinates) else -1.0,
+                hook if any(abs(piece[1] - value) <= tol for value in coordinates) else -1.0)
+
+
     # ==================== Konturmodus: Randausbildung ====================
 
     def _contour_edges(self) -> list[tuple[int, str, float, tuple, tuple]]:
@@ -1308,6 +1396,8 @@ class SlabReinforcement():
 
         edges = []
 
+        bbox = loop_bbox(self.contour)
+
         for index, start in enumerate(self.contour):
             end = self.contour[(index + 1) % len(self.contour)]
 
@@ -1316,6 +1406,22 @@ class SlabReinforcement():
 
             if length < 1.0:
                 continue
+
+            # Achsparallel? Nur solche Kanten bekommen Randbügel; schräge
+            # Kanten werden ignoriert und die parallelen Nachbarkanten
+            # laufen bis zur Bounding Box weiter, als wäre die Schräge
+            # ausgefüllt
+            axis_parallel = abs(dx) < 1.0 or abs(dy) < 1.0
+
+            if axis_parallel:
+                previous = self.contour[index - 1]
+                following = self.contour[(index + 2) % len(self.contour)]
+
+                start, end = self._extend_over_slants(start, end, previous,
+                                                      following, bbox)
+
+                dx, dy = end[0] - start[0], end[1] - start[1]
+                length = math.hypot(dx, dy)
 
             # Aussennormale bei positivem Umlaufsinn: (dy, -dx)
             nx, ny = sign * dy / length, -sign * dx / length
@@ -1328,9 +1434,35 @@ class SlabReinforcement():
             # Innennormale (dorthin zeigen die Bügelschenkel)
             inward = math.degrees(math.atan2(-ny, -nx))
 
-            edges.append((index, option, inward, start, end))
+            edges.append((index, option, inward, start, end, axis_parallel))
 
         return edges
+
+
+    def _extend_over_slants(self, start, end, previous, following, bbox):
+        """Verlängert eine achsparallele Kante über angrenzende Schrägen
+        hinweg bis zur Bounding Box — der Randbügel fährt dann durch, als
+        wäre die Schräge ausgefüllt.
+        """
+
+        horizontal = abs(end[1] - start[1]) < 1.0
+        axis = 0 if horizontal else 1
+        low, high = bbox[axis], bbox[axis + 2]
+
+        forward = end[axis] >= start[axis]
+
+        def slanted(a, b):
+            return abs(a[0] - b[0]) > 1.0 and abs(a[1] - b[1]) > 1.0
+
+        new_start, new_end = list(start), list(end)
+
+        if slanted(previous, start):
+            new_start[axis] = low if forward else high
+
+        if slanted(end, following):
+            new_end[axis] = high if forward else low
+
+        return tuple(new_start), tuple(new_end)
 
 
     def _edge_extensions(self, layer: LayerConfig) -> dict[int, float]:
@@ -1338,7 +1470,7 @@ class SlabReinforcement():
 
         lap = self.overlap_factor * layer.diameter
 
-        return {index: lap for index, option, _, _, _ in self._contour_edges()
+        return {index: lap for index, option, _, _, _, _ in self._contour_edges()
                 if option == SIDE_CONNECT}
 
 
@@ -1353,8 +1485,18 @@ class SlabReinforcement():
 
         placements: list[AllplanReinf.BarPlacement] = []
 
-        for index, option, inward, start, end in self._contour_edges():
+        for index, option, inward, start, end, axis_parallel in self._contour_edges():
             if option in (SIDE_NONE, SIDE_CONNECT):
+                continue
+
+            # Randbügel nur an achsparallelen Kanten; an schrägen Kanten
+            # übernehmen die verlängerten Nachbarkanten
+            if option == SIDE_STIRRUP and not axis_parallel:
+                continue
+
+            # "Am Eisen angebogen": kein eigener Bügel, stattdessen bekommen
+            # die Lagenstäbe an dieser Kante einen Haken
+            if option == SIDE_STIRRUP and self.stirrup_style != 'Einzeln':
                 continue
 
             dx, dy = end[0] - start[0], end[1] - start[1]
@@ -1612,8 +1754,12 @@ class SlabReinforcement():
 
         piece_from, piece_to = piece
 
-        # Nettolänge: die Deckung steckt bereits in den Segmentgrenzen
-        shape = self._create_straight_bar_shape(layer, piece_to - piece_from, 0.0, 0.0)
+        # Nettolänge: die Deckung steckt bereits in den Segmentgrenzen.
+        # An Kanten mit angebogenem Randbügel bekommt der Stab dort einen Haken.
+        start_hook, end_hook = self._piece_hooks(layer, piece)
+
+        shape = self._create_straight_bar_shape(layer, piece_to - piece_from,
+                                                0.0, 0.0, start_hook, end_hook)
 
         first = positions[0]
 

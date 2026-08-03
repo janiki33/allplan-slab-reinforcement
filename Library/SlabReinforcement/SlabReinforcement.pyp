@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.4.1</Version>
+    <Version>0.4.2</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -306,6 +306,13 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
+            <Name>StirrupStyle</Name>
+            <Text>Randbügel-Ausführung</Text>
+            <Value>Einzeln</Value>
+            <ValueList>Einzeln|Am Eisen angebogen</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
             <Name>SideLeft</Name>
             <Text>Links (X=0)</Text>
             <Value>Keine</Value>
@@ -491,10 +498,39 @@
             <ValueType>ReinfConcreteGrade</ValueType>
           </Parameter>
           <Parameter>
+            <Name>CoverMode</Name>
+            <Text>Betondeckung</Text>
+            <Value>Alle gleich</Value>
+            <ValueList>Alle gleich|Getrennt</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
             <Name>ConcreteCover</Name>
-            <Text>Betondeckung (alle Lagen und Stabenden)</Text>
+            <Text>Betondeckung (alle Seiten)</Text>
             <Value>40</Value>
             <ValueType>ReinfConcreteCover</ValueType>
+            <Visible>CoverMode == "Alle gleich"</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>CoverBottom</Name>
+            <Text>unten (UK Decke bis AK 1. Lage)</Text>
+            <Value>40</Value>
+            <ValueType>ReinfConcreteCover</ValueType>
+            <Visible>CoverMode == "Getrennt"</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>CoverTop</Name>
+            <Text>oben (OK Decke bis AK 4. Lage)</Text>
+            <Value>40</Value>
+            <ValueType>ReinfConcreteCover</ValueType>
+            <Visible>CoverMode == "Getrennt"</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>CoverSide</Name>
+            <Text>seitlich (Stabenden)</Text>
+            <Value>40</Value>
+            <ValueType>ReinfConcreteCover</ValueType>
+            <Visible>CoverMode == "Getrennt"</Visible>
           </Parameter>
           <Parameter>
             <Name>MinBarLength</Name>
