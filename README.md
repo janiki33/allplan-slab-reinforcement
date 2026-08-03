@@ -40,6 +40,7 @@ PythonPartsScripts/SlabReinforcement/
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
 tests/                                               65 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
+tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
 tools/Sync-SlabReinforcement.ps1                     Sync GitHub → lokales Allplan-Verzeichnis (Windows)
 ```
 
@@ -80,6 +81,28 @@ Abgeglichen werden:
 | `PythonPartsScripts/SlabReinforcement/opening_clipping.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `PythonPartsScripts/SlabReinforcement/lap_splitting.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `Library/SlabReinforcement/SlabReinforcement.pyp` | `Library\SlabReinforcement\` |
+
+### Per Doppelklick
+
+`tools/Update-SlabReinforcement.cmd` ist die Datei zum Anklicken. Sie sucht
+`Sync-SlabReinforcement.ps1` neben sich, lädt es sonst von GitHub (Ablage unter
+`%LOCALAPPDATA%\AllplanSlabReinforcementSync\`), führt den Abgleich mit dem
+Standardziel `J:\Allplan\Usr\Janosch` aus und lässt das Fenster mit dem Ergebnis
+offen stehen. Anderes Ziel oder anderer Branch: die Zeilen `set "TARGET=..."`
+bzw. `set "BRANCH=..."` oben in der Datei anpassen.
+
+Einmal herunterladen, z. B. auf den Desktop:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -OutFile "$env:USERPROFILE\Desktop\Update-SlabReinforcement.cmd" `
+  https://raw.githubusercontent.com/janiki33/allplan-slab-reinforcement/claude/slab-reinforcement-sync-nykay9/tools/Update-SlabReinforcement.cmd
+```
+
+Danach genügt ein Doppelklick, wann immer der lokale Stand aktualisiert werden
+soll. Schalter werden durchgereicht: `Update-SlabReinforcement.cmd -Install`
+richtet den automatischen Abgleich ein, `-Uninstall` entfernt ihn wieder.
+
+### Direkt über PowerShell
 
 Einmalig ausführen (Standardziel `J:\Allplan\Usr\Janosch`):
 
