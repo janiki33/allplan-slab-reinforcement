@@ -79,21 +79,30 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
 
 ## Automatischer Abgleich GitHub → lokal (Windows)
 
-`tools/Sync-SlabReinforcement.ps1` holt die fünf benötigten Dateien direkt von
-`raw.githubusercontent.com` und schreibt sie in das Allplan-Benutzerverzeichnis.
-GitHub ist dabei die Quelle der Wahrheit — lokale Änderungen an diesen Dateien
-werden überschrieben. Geschrieben wird nur, wenn sich der Inhalt (SHA-256)
-unterscheidet; bei einer Änderung wird zusätzlich `__pycache__` geleert.
-
-Abgeglichen werden:
+`tools/Sync-SlabReinforcement.ps1` spiegelt zwei Ordner in das
+Allplan-Benutzerverzeichnis:
 
 | GitHub | lokal (unterhalb `-AllplanUsr`) |
 | --- | --- |
-| `PythonPartsScripts/SlabReinforcement/SlabReinforcementScript.py` | `PythonPartsScripts\SlabReinforcement\` |
-| `PythonPartsScripts/SlabReinforcement/contour_placement.py` | `PythonPartsScripts\SlabReinforcement\` |
-| `PythonPartsScripts/SlabReinforcement/opening_clipping.py` | `PythonPartsScripts\SlabReinforcement\` |
-| `PythonPartsScripts/SlabReinforcement/lap_splitting.py` | `PythonPartsScripts\SlabReinforcement\` |
-| `Library/SlabReinforcement/SlabReinforcement.pyp` | `Library\SlabReinforcement\` |
+| `PythonPartsScripts/SlabReinforcement/` | `PythonPartsScripts\SlabReinforcement\` |
+| `Library/SlabReinforcement/` | `Library\SlabReinforcement\` |
+
+Welche `.py`/`.pyp`-Dateien darin liegen, fragt das Skript bei **jedem Lauf**
+über die GitHub-API ab — es gibt keine fest verdrahtete Dateiliste, die bei
+einer Umbenennung veraltet. Neue Dateien kommen dadurch automatisch mit.
+
+GitHub ist die Quelle der Wahrheit:
+
+- Verglichen wird über den Git-Blob-Hash; heruntergeladen wird nur, was sich
+  unterscheidet.
+- Lokale Änderungen an den gespiegelten Dateien werden überschrieben.
+- Lokale `.py`/`.pyp`-Dateien, die es im Repository nicht (mehr) gibt, werden
+  gelöscht — das fängt Umbenennungen ab, die sonst als Karteileiche den Import
+  blockieren. Mit `-KeepExtraFiles` unterbleibt das.
+- Bei jeder Änderung wird `__pycache__` geleert.
+
+Die API erlaubt 60 Abfragen pro Stunde und IP; der Abgleich braucht zwei davon.
+Reicht das im Büro nicht, `-Token <GitHub-PAT>` mitgeben.
 
 ### Per Doppelklick
 
@@ -120,7 +129,7 @@ richtet den automatischen Abgleich ein, `-Uninstall` entfernt ihn wieder.
 Einmalig ausführen (Standardziel `J:\Allplan\Usr\Janosch`):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Sync-SlabReinforcement.ps1 -RemoveStale
+powershell -ExecutionPolicy Bypass -File .\tools\Sync-SlabReinforcement.ps1
 ```
 
 Dauerhaft alle 10 Minuten und bei jeder Anmeldung (geplante Aufgabe anlegen):
@@ -134,8 +143,8 @@ Dauerlauf im Fenster: `-IntervalSeconds 300`.
 
 Nützliche Parameter: `-AllplanUsr <Pfad>` (anderes Zielverzeichnis),
 `-Branch <name>` (anderer Branch), `-LogFile <Pfad>` (Protokoll),
-`-RemoveStale` (löscht die veraltete `SlabReinforcement.py`, deren Name mit dem
-Paketordner kollidiert und den Import verhindert).
+`-KeepExtraFiles` (lokale Dateien behalten, die es im Repository nicht gibt),
+`-Token <PAT>` (bei erschöpftem API-Limit).
 
 > Das Skript kopiert Dateien, es startet Allplan nicht neu — nach einer
 > Aktualisierung der `.py` gilt weiterhin der Hinweis oben.

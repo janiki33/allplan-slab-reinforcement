@@ -60,7 +60,7 @@ exit /b 3
 
 :run
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -AllplanUsr "%TARGET%" -Branch "%BRANCH%" -Repo "%REPO%" -RemoveStale %*
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -AllplanUsr "%TARGET%" -Branch "%BRANCH%" -Repo "%REPO%" %*
 set "RC=%ERRORLEVEL%"
 
 echo.
