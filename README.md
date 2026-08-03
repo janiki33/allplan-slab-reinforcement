@@ -232,7 +232,16 @@ verifiziert.
   Elementmodus gilt die Option **je Konturkante**: Jede Kante bekommt die
   Einstellung der Richtung, in die ihre Aussennormale zeigt — eine schräge
   Kante also die der überwiegenden Richtung. Die Bügelschenkel zeigen
-  immer nach innen (Rotation = Innennormale − 90°). Die Stoßlänge ist als
+  immer nach innen (Rotation = Innennormale − 90°).
+  **Randbügel ignorieren schräge Plattenseiten:** An einer Schräge wird
+  kein Bügel gesetzt; stattdessen laufen die angrenzenden achsparallelen
+  Kanten bis zur Bounding Box durch, als wäre die Schräge ausgefüllt — so
+  wie es die Rechtecke aus Schritt 1 vorgeben.
+  **Randbügel-Ausführung** ist wählbar: *Einzeln* erzeugt eigene U-Bügel,
+  *Am Eisen angebogen* verzichtet darauf und biegt stattdessen die Stäbe
+  der 1. und 2. Lage an dieser Kante ab (Hakenlänge = Achsmass des
+  Bügels). Lage und Verlegung der Bewehrungslagen ändern sich dadurch
+  nicht. Die Stoßlänge ist als
   Stoßfaktor (Vielfaches von ø) konfigurierbar — bewusst kein Normwert.
   Randbügel und separate Anschlusseisen sparen den Bereich einer Öffnung
   aus, wenn diese den jeweiligen Randstreifen schneidet. Bekannte
@@ -255,17 +264,25 @@ verifiziert.
 Bei jeder Parameteränderung ruft Allplan `create_element` neu auf —
 das ist die übliche Live-Vorschau von Standard-PythonParts.
 
-### Höhenlagen-Konvention
+### Betondeckung und Höhenlagen
 
-Die Höhenlage jedes Stabes steckt in der z-Koordinate der Verlegepunkte
-(Stabachse); die Quer-Betondeckung des Shapes ist 0. Dieses Modell stammt
-aus deinem Deckenplatte-PythonPart und ergibt mit einer einzigen
-Betondeckung `c` (äussere Richtung = die unter „Verlegung" gewählte):
+Die Betondeckung ist wahlweise **ein Wert für alles** („Alle gleich") oder
+**getrennt** einstellbar:
 
-- unten aussen: `c + ø/2`
-- unten innen:  `c + ø_aussen + ø/2`
-- oben aussen:  `Dicke − c − ø/2`
-- oben innen:   `Dicke − c − ø_aussen − ø/2`
+- **unten** `c_u` — Abstand Unterkante Decke bis **Aussenkante der 1. Lage**;
+  die Höhe der 2. Lage folgt daraus.
+- **oben** `c_o` — Abstand Oberkante Decke bis **Aussenkante der 4. Lage**;
+  die Höhe der 3. Lage folgt daraus.
+- **seitlich** `c_s` — gilt für die Stabenden und die Verlegeränder.
+
+Die Höhenlage steckt in der z-Koordinate der Verlegepunkte (Stabachse),
+die Quer-Betondeckung des Shapes ist 0 — Modell aus dem
+Deckenplatte-PythonPart. Mit der äusseren Richtung aus „Verlegung":
+
+- 1. Lage (unten aussen): `c_u + ø/2`
+- 2. Lage (unten innen):  `c_u + ø_1 + ø/2`
+- 4. Lage (oben aussen):  `Dicke − c_o − ø/2`
+- 3. Lage (oben innen):   `Dicke − c_o − ø_4 − ø/2`
 
 Randverstärkungs-Zulagen liegen als eigene Ebenen innerhalb der Hauptlagen
 (unten oberhalb der inneren unteren Lage, oben unterhalb der inneren oberen
