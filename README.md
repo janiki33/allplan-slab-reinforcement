@@ -14,7 +14,7 @@ keine Kopie kommerzieller Plugins.
 | v0.2 | Rechteckige Öffnung: Kappen der Hauptstäbe, umlaufende Randverstärkung mit konfigurierbarer Übergreifungslänge | umgesetzt |
 | v0.2.1 | Randausbildung je Kante (U-Randbügel / Anschlusseisen / separate Anschlusseisen / keine), Stoßfaktor, „Alle Lagen gleich", wählbare äußere Lagenrichtung, Allplan-Layer je Lage, Handles | umgesetzt |
 | v0.3 | ScriptObject-Struktur mit drei Eingabemodi (Rechteck-Drag / Polygon zeichnen / Element wählen), Scanline-Verlegung für polygonale Konturen, mehrere Öffnungen, Randverdichtung via `calculate_length_of_regions` | umgesetzt |
-| v0.3.2 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
+| v0.3.3 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
 | v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Randbügel/Anschlusseisen an Polygonkanten, Diagonalzulagen an Öffnungsecken | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
@@ -40,7 +40,7 @@ PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modu
     opening_clipping.py                              Reine Band-/Kapp-Logik Rechteckmodus (ohne Allplan, testbar)
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
-tests/                                               65 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
+tests/                                               66 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
 tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
 tools/Sync-SlabReinforcement.ps1                     Sync GitHub → lokales Allplan-Verzeichnis (Windows)
 ```
@@ -89,7 +89,8 @@ Abgeglichen werden:
 
 | GitHub | lokal (unterhalb `-AllplanUsr`) |
 | --- | --- |
-| `PythonPartsScripts/SlabReinforcement/SlabReinforcementScript.py` | `PythonPartsScripts\SlabReinforcement\` |
+| `PythonPartsScripts/SlabReinforcement/__init__.py` | `PythonPartsScripts\SlabReinforcement\` |
+| `PythonPartsScripts/SlabReinforcement/slab_reinforcement.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `PythonPartsScripts/SlabReinforcement/contour_placement.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `PythonPartsScripts/SlabReinforcement/opening_clipping.py` | `PythonPartsScripts\SlabReinforcement\` |
 | `PythonPartsScripts/SlabReinforcement/lap_splitting.py` | `PythonPartsScripts\SlabReinforcement\` |
