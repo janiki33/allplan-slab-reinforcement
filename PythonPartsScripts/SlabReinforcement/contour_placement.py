@@ -450,7 +450,7 @@ def group_bars_into_steps(bars: list[ContourBar],
         unified = unify(group)
 
         if length_raster > 0:
-            unified = tuple(_round_inward(seg, length_raster) for seg in unified)
+            unified = tuple(_round_outward(seg, length_raster) for seg in unified)
 
         # Vereinheitlichung und Rundung verkürzen die Stäbe noch einmal —
         # deshalb hier erneut gegen die Mindestlänge prüfen
@@ -698,9 +698,10 @@ def _steps_from_bars(bars: list[ContourBar],
                    den Beton; die längeren werden um bis zu
                    max_step_deviation verkürzt.
 
-    Das Längenraster wird in beiden Fällen **nach innen** gerundet — ein
-    Stab darf nie über den Referenzstab hinauswachsen, sonst wäre die
-    seitliche Deckung schon durch die Rundung verletzt.
+    Das Längenraster rundet in Richtung des Referenzstabes: bei LONGEST
+    nach aussen (die Stufe folgt der Schräge, wie vom Anwender vorgegeben),
+    bei SHORTEST nach innen — dort darf die Rundung die gerade erst
+    gesicherte Deckung nicht wieder auffressen.
     """
 
     def enclosing(group: list[ContourBar]) -> tuple[Interval, ...]:
@@ -730,7 +731,9 @@ def _steps_from_bars(bars: list[ContourBar],
         unified = enclosing(group)
 
         if length_raster > 0:
-            unified = tuple(_round_inward(seg, length_raster) for seg in unified)
+            round_to_raster = _round_inward if reference == SHORTEST else _round_outward
+
+            unified = tuple(round_to_raster(seg, length_raster) for seg in unified)
 
         unified = tuple(seg for seg in unified if seg[1] - seg[0] >= min_bar_length)
 

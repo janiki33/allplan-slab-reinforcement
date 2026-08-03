@@ -399,7 +399,7 @@ eine klar definierte, konfigurierbare **Bürostandard-Regel**:
 
 Woran diese Länge gemessen wird, ist eine Entscheidung mit einem
 unvermeidlichen Zielkonflikt — deshalb die Palettenoption
-**`StepReference`**:
+**`StepMeasuredAt`**:
 
 | Einstellung | Länge der Stufe | Folge |
 | --- | --- | --- |

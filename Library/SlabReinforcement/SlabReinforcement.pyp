@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.5.0</Version>
+    <Version>0.5.1</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -108,7 +108,7 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>StepReference</Name>
+            <Name>StepMeasuredAt</Name>
             <Text>Stufe vermessen an</Text>
             <Value>Längstes Eisen</Value>
             <ValueList>Längstes Eisen|Kürzestes Eisen</ValueList>

@@ -153,7 +153,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.5.0'
+SCRIPT_VERSION = '0.5.1'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -684,7 +684,7 @@ class SlabReinforcement():
         # Länge hinaus — also in die seitliche Deckung hinein. Am kürzesten
         # bleibt jeder Stab im Beton.
         self.step_reference = SHORTEST \
-            if build_ele.StepReference.value == 'Kürzestes Eisen' else LONGEST
+            if build_ele.StepMeasuredAt.value == 'Kürzestes Eisen' else LONGEST
         self.max_edge_setback = build_ele.MaxEdgeSetback.value
 
         # Variante A: Rechteckgrenzen fluchten über die Bänder hinweg,

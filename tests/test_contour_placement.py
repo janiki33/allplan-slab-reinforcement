@@ -348,9 +348,8 @@ class DecompositionTest(unittest.TestCase):
             if not own:
                 continue
 
-            # bis zum längsten Stab, aber nie darüber hinaus (sonst wäre
-            # die seitliche Deckung schon durch die Rundung verletzt)
-            self.assertGreaterEqual(built_from, min(own) - 1e-6)
+            # bis zum längsten Stab (das Raster rundet dort nach aussen)
+            self.assertLessEqual(built_from, min(own) + 1e-6)
             # und nicht am kürzesten Stab abgeschnitten
             self.assertLess(built_from, max(own) + 1e-6)
 
@@ -369,7 +368,7 @@ class DecompositionTest(unittest.TestCase):
                     # Stufe darf den Stab verlängern, aber nur begrenzt
                     # (zusätzlich bis zu einem Raster je Ende durch die Rundung)
                     overshoot = max(own_from - built[0], 0) + max(built[1] - own_to, 0)
-                    self.assertLessEqual(overshoot, deviation + 1e-6)
+                    self.assertLessEqual(overshoot, deviation + 2 * raster + 1e-6)
 
     def test_round_outward_never_shortens(self):
         self.assertEqual(_round_outward((1050, 1560), 100), (1000, 1600))
@@ -521,21 +520,22 @@ class StepReferenceTest(unittest.TestCase):
 
         self.assertTrue(any(value > 1.0 for value in overshoots))
 
-    def test_raster_never_grows_past_the_reference_bar(self):
-        for reference in (LONGEST, SHORTEST):
-            bars, zones = self._zones(reference)
-            widest = {bar.position: bar.segments for bar in bars}
+    def test_shortest_raster_never_grows_past_the_reference_bar(self):
+        # Bei SHORTEST rundet das Raster nach innen — die gerade erst
+        # gesicherte Deckung darf es nicht wieder auffressen.
+        bars, zones = self._zones(SHORTEST)
+        widest = {bar.position: bar.segments for bar in bars}
 
-            for zone in zones:
-                for i, built in enumerate(zone.segments[0]):
-                    own = [widest[p][i] for p in zone.positions
-                           if p in widest and i < len(widest[p])]
+        for zone in zones:
+            for i, built in enumerate(zone.segments[0]):
+                own = [widest[p][i] for p in zone.positions
+                       if p in widest and i < len(widest[p])]
 
-                    if not own:
-                        continue
+                if not own:
+                    continue
 
-                    self.assertGreaterEqual(built[0], min(lo for lo, _ in own) - 1e-6)
-                    self.assertLessEqual(built[1], max(hi for _, hi in own) + 1e-6)
+                self.assertGreaterEqual(built[0], min(lo for lo, _ in own) - 1e-6)
+                self.assertLessEqual(built[1], max(hi for _, hi in own) + 1e-6)
 
 
 class ParallelEdgeCoverTest(unittest.TestCase):
