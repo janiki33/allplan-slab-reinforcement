@@ -16,9 +16,9 @@ keine Kopie kommerzieller Plugins.
 | v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
-Original-Beispiele entwickelt, aber noch nicht in einer laufenden
-Allplan-Installation getestet. Beim ersten Test insbesondere die Höhenlage
-der Stäbe (siehe „Höhenlagen-Konvention") kontrollieren.
+Original-Beispiele entwickelt und von einem unabhängigen Review gegen die
+Spezifikation geprüft (u. a. Rotationswinkel der Shapes und Hook-Defaults),
+aber noch nicht in einer laufenden Allplan-Installation getestet.
 
 ## Dateistruktur
 
@@ -49,7 +49,8 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
   (unten zuerst verlegt, oben zuoberst), Y-Lage innen.
 - **Öffnung:** eine rechteckige Öffnung über Lage und Abmessung; Zulagen
   (Anzahl, Ø, Abstand) und Übergreifungslänge sind frei konfigurierbar.
-- **Allgemein:** Betongüte, seitliche Deckung, Format-Eigenschaften,
+- **Allgemein:** Betongüte, seitliche Deckung, Mindeststablänge (kürzere
+  Reststücke neben Öffnungen entfallen ersatzlos), Format-Eigenschaften,
   „Als PythonPart erzeugen".
 
 Bei jeder Parameteränderung ruft Allplan `create_element` neu auf —
@@ -66,6 +67,12 @@ offiziellen `BarPlacement`-Beispiel:
 - unten Y: `cover_unten + Ø(unten X)`
 - oben X: `Dicke − cover_oben − Ø(oben X)`
 - oben Y: `Dicke − cover_oben − Ø(oben X) − Ø(oben Y)`
+
+Randverstärkungs-Zulagen liegen als eigene Ebenen innerhalb der Hauptlagen
+(unten oberhalb der inneren unteren Lage, oben unterhalb der inneren oberen
+Lage; X- und Y-Zulagen gestapelt), damit sich keine Stäbe durchdringen.
+Lagen, für die die Plattendicke nicht ausreicht, entfallen mit einer Meldung
+im Trace-Fenster statt falsch erzeugt zu werden.
 
 ### Normen / Bemessung
 

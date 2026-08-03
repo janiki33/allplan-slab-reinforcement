@@ -155,12 +155,29 @@ class SlabReinforcement():
 
         layers = [bottom_x, bottom_y, top_x, top_y]
 
-        # Biegerollendurchmesser normabhängig aus Allplan ermitteln (kein Bügel)
+        # Plausibilität der Höhenlagen: bei dünner Platte und großen
+        # Durchmessern können sich obere und untere Lagen durchdringen oder
+        # aus der Platte herausfallen — betroffene obere Lagen entfallen dann
+        # mit Warnung, statt falsche Bewehrung zu erzeugen
+        bottom_layer_top = bottom_y.z_clear + bottom_y.diameter
+
+        valid_layers = []
+
         for layer in layers:
+            if layer.z_clear < 0 or (layer.is_top and layer.z_clear < bottom_layer_top):
+                print(f'SlabReinforcement: Lage "{layer.name}" entfällt — '
+                      f'Plattendicke {self.thickness} zu gering für die '
+                      f'gewählten Deckungen/Durchmesser')
+                continue
+
+            valid_layers.append(layer)
+
+        # Biegerollendurchmesser normabhängig aus Allplan ermitteln (kein Bügel)
+        for layer in valid_layers:
             layer.bending_roller = AllplanReinf.BendingRollerService.GetBendingRollerFactor(
                 layer.diameter, layer.steel_grade, -1, False)
 
-        return layers
+        return valid_layers
 
 
     def create(self) -> CreateElementResult:
@@ -208,7 +225,7 @@ class SlabReinforcement():
 
         err, slab_with_opening = AllplanGeo.MakeSubtraction(slab, opening)
 
-        if err or slab_with_opening is None:
+        if err != AllplanGeo.eGeometryErrorCode.eOK or slab_with_opening is None:
             return slab
 
         return slab_with_opening
@@ -232,18 +249,27 @@ class SlabReinforcement():
         Die Höhenlage wird über die "bottom"-Deckung eingestellt: Sie ist der
         lichte Abstand der Stabunterkante zur Placement-Ebene (z=0), analog zur
         Längsbewehrung im offiziellen BarPlacement-Beispiel.
+
+        Das Shape entsteht im lokalen XY-System (Stab entlang lokal X, die
+        bottom-Deckung versetzt in lokal +Y). Die erste 90°-Drehung um X kippt
+        den Deckungsversatz nach global +Z, die zweite Drehung um Z stellt die
+        Stabrichtung ein — wie RotationUtil(90, 0, 90) im BarPlacement-Beispiel.
         """
 
-        model_angles = RotationUtil(0, 0, 0) if layer.direction == 'X' else RotationUtil(0, 0, 90)
+        model_angles = RotationUtil(90, 0, 0) if layer.direction == 'X' else RotationUtil(90, 0, 90)
 
         cover_props = ConcreteCoverProperties.left_right_bottom(cover_start,
                                                                 cover_end,
                                                                 layer.z_clear)
 
+        # start_hook/end_hook = -1: keine Haken (der Default 0 würde Haken
+        # mit automatisch berechneter Länge erzeugen)
         return GeneralShapeBuilder.create_longitudinal_shape_with_hooks(length,
                                                                         model_angles,
                                                                         self._shape_props(layer),
-                                                                        cover_props)
+                                                                        cover_props,
+                                                                        start_hook=-1,
+                                                                        end_hook=-1)
 
 
     def _create_layer_placements(self, layer: LayerConfig) -> list[AllplanReinf.BarPlacement]:
@@ -264,8 +290,13 @@ class SlabReinforcement():
         if not self.has_opening:
             opening_run = opening_dist = None
 
+        # Reststäbe unterhalb der konfigurierten Mindestlänge (mindestens aber
+        # beidseitige Deckung + 10 mm Reststab) entfallen ersatzlos
+        min_segment_length = max(self.build_ele.MinBarLength.value,
+                                 2 * self.side_cover + 10)
+
         bands = compute_placement_bands(dist_len, run_len, opening_dist, opening_run,
-                                        min_segment_length=2 * self.side_cover + layer.spacing)
+                                        min_segment_length=min_segment_length)
 
         placements: list[AllplanReinf.BarPlacement] = []
 
@@ -319,29 +350,53 @@ class SlabReinforcement():
         lap_length = build_ele.LapLength.value
         bar_count = build_ele.EdgeBarCount.value
         bar_spacing = build_ele.EdgeBarSpacing.value
-        zone_width = bar_count * bar_spacing
+        edge_diameter = build_ele.EdgeBarDiameter.value
+
+        # Verlegezone mit (n-1) Zwischenräumen, damit der Palettenwert dem
+        # tatsächlichen Achsabstand entspricht; die erste Stabachse wird um
+        # einen Stabdurchmesser von der Öffnungskante abgerückt
+        zone_width = max((bar_count - 1) * bar_spacing, 1.0)
+        edge_margin = edge_diameter
+
+        # Zulagen liegen als eigene Ebenen innerhalb der Hauptlagen: unten
+        # oberhalb der inneren unteren Lage, oben unterhalb der inneren oberen
+        # Lage — X- und Y-Zulagen übereinander gestapelt, damit sich weder
+        # Haupt- noch Zulagestäbe durchdringen
+        bottom_mains = [layer for layer in self.layers if not layer.is_top]
+        top_mains = [layer for layer in self.layers if layer.is_top]
+
+        bottom_base = max(layer.z_clear + layer.diameter for layer in bottom_mains) if bottom_mains else None
+        top_base = min(layer.z_clear for layer in top_mains) if top_mains else None
 
         edge_layers = []
 
         for direction in ('X', 'Y'):
+            stack_index = 0 if direction == 'X' else 1
+
             for is_top in (False, True):
-                main_layer = next(layer for layer in self.layers
-                                  if layer.direction == direction and layer.is_top == is_top)
+                main_layer = next((layer for layer in self.layers
+                                   if layer.direction == direction and layer.is_top == is_top), None)
+
+                if main_layer is None or (top_base if is_top else bottom_base) is None:
+                    continue
 
                 edge_layer = LayerConfig(f'Randeinfassung {direction} {"oben" if is_top else "unten"}',
                                          direction, is_top,
-                                         build_ele.EdgeBarDiameter.value,
+                                         edge_diameter,
                                          bar_spacing,
                                          main_layer.cover,
                                          main_layer.steel_grade)
 
-                # Höhenlage direkt neben der Haupt-Lage: Zulagen liegen eine
-                # Stablage weiter innen, damit sie nicht mit den (gekappten)
-                # Hauptstäben kollidieren
                 if is_top:
-                    edge_layer.z_clear = main_layer.z_clear - edge_layer.diameter
+                    edge_layer.z_clear = top_base - (stack_index + 1) * edge_diameter
                 else:
-                    edge_layer.z_clear = main_layer.z_clear + main_layer.diameter
+                    edge_layer.z_clear = bottom_base + stack_index * edge_diameter
+
+                if edge_layer.z_clear < 0 or \
+                        (is_top and bottom_base is not None and edge_layer.z_clear < bottom_base):
+                    print(f'SlabReinforcement: Zulage "{edge_layer.name}" entfällt — '
+                          f'kein Platz innerhalb der Hauptlagen')
+                    continue
 
                 edge_layer.bending_roller = AllplanReinf.BendingRollerService.GetBendingRollerFactor(
                     edge_layer.diameter, edge_layer.steel_grade, -1, False)
@@ -358,8 +413,13 @@ class SlabReinforcement():
                 run_len, dist_len = self.width, self.length
                 opening_run, opening_dist = self.opening_y, self.opening_x
 
-            for run in compute_edge_bar_runs(dist_len, run_len, opening_dist, opening_run,
-                                             lap_length, zone_width):
+            # Öffnungsintervall auf der Verteilachse um den Randabstand
+            # aufweiten, damit die erste Stabachse nicht auf der Kante liegt
+            opening_dist_with_margin = (opening_dist[0] - edge_margin,
+                                        opening_dist[1] + edge_margin)
+
+            for run in compute_edge_bar_runs(dist_len, run_len, opening_dist_with_margin,
+                                             opening_run, lap_length, zone_width):
                 cover_start = self.side_cover if run.run_from == 0 else 0
                 cover_end = self.side_cover if run.run_to == run_len else 0
 

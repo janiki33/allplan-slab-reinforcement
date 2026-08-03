@@ -297,6 +297,13 @@
             <Value>25</Value>
             <ValueType>ReinfConcreteCover</ValueType>
           </Parameter>
+          <Parameter>
+            <Name>MinBarLength</Name>
+            <Text>Mindeststablänge</Text>
+            <Value>300</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
+          </Parameter>
         </Parameters>
       </Parameter>
       <Parameter>
