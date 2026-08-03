@@ -162,12 +162,6 @@
             <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
-            <Name>BottomXCover</Name>
-            <Text>Betondeckung unten</Text>
-            <Value>25</Value>
-            <ValueType>ReinfConcreteCover</ValueType>
-          </Parameter>
-          <Parameter>
             <Name>BottomXSteelGrade</Name>
             <Text>Stahlgüte</Text>
             <Value>4</Value>
@@ -194,12 +188,6 @@
             <MinValue>25</MinValue>
             <ValueType>Length</ValueType>
             <Visible>SameDiameterForAll == False</Visible>
-          </Parameter>
-          <Parameter>
-            <Name>BottomYCover</Name>
-            <Text>Betondeckung unten</Text>
-            <Value>25</Value>
-            <ValueType>ReinfConcreteCover</ValueType>
           </Parameter>
           <Parameter>
             <Name>BottomYSteelGrade</Name>
@@ -236,12 +224,6 @@
             <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
-            <Name>TopXCover</Name>
-            <Text>Betondeckung oben</Text>
-            <Value>30</Value>
-            <ValueType>ReinfConcreteCover</ValueType>
-          </Parameter>
-          <Parameter>
             <Name>TopXSteelGrade</Name>
             <Text>Stahlgüte</Text>
             <Value>4</Value>
@@ -268,12 +250,6 @@
             <MinValue>25</MinValue>
             <ValueType>Length</ValueType>
             <Visible>SameDiameterForAll == False</Visible>
-          </Parameter>
-          <Parameter>
-            <Name>TopYCover</Name>
-            <Text>Betondeckung oben</Text>
-            <Value>30</Value>
-            <ValueType>ReinfConcreteCover</ValueType>
           </Parameter>
           <Parameter>
             <Name>TopYSteelGrade</Name>
@@ -453,9 +429,9 @@
             <ValueType>ReinfConcreteGrade</ValueType>
           </Parameter>
           <Parameter>
-            <Name>SideCover</Name>
-            <Text>Betondeckung seitlich</Text>
-            <Value>25</Value>
+            <Name>ConcreteCover</Name>
+            <Text>Betondeckung (alle Lagen und Stabenden)</Text>
+            <Value>35</Value>
             <ValueType>ReinfConcreteCover</ValueType>
           </Parameter>
           <Parameter>

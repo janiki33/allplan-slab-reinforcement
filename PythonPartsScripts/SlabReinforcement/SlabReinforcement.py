@@ -53,7 +53,6 @@ from StdReinfShapeBuilder.RotationAngles import RotationAngles
 from TypeCollections.HandleList import HandleList
 from TypeCollections.ModelEleList import ModelEleList
 from Utils.HandleCreator import HandleCreator
-from Utils.RotationUtil import RotationUtil
 
 # Nachbarmodule im selben Ordner: relativer Import wie im offiziellen
 # Beispiel (ArchitectureExamples/Objects/DoorOpening.py: "from .OpeningBase
@@ -126,9 +125,8 @@ class LayerConfig:
     is_top: bool         # obere (True) oder untere (False) Lage
     diameter: float      # Stabdurchmesser [mm]
     spacing: float       # Stababstand [mm]
-    cover: float         # Betondeckung zur maßgebenden Plattenoberfläche [mm]
     steel_grade: int     # Index der Stahlgüte (Allplan-Tabelle)
-    z_clear: float = 0.0  # lichter Abstand Stabunterkante zu OK Rohdecke unten (z=0)
+    z_axis: float = 0.0  # Höhe der Stabachse über Plattenunterkante [mm]
     bending_roller: float = 4.0
     allplan_layer: int = 0  # Allplan-Layer-ID; 0 = aktueller Layer
 
@@ -465,7 +463,7 @@ class SlabReinforcement():
         self.width = build_ele.SlabWidth.value
         self.thickness = thickness_override or build_ele.SlabThickness.value
 
-        self.side_cover = build_ele.SideCover.value
+        self.concrete_cover = build_ele.ConcreteCover.value
         self.concrete_grade = build_ele.ConcreteGrade.value
 
         # Seitenausbildung und Stoßlänge (als Vielfaches des Stabdurchmessers)
@@ -528,22 +526,18 @@ class SlabReinforcement():
         bottom_x = LayerConfig('Bewehrung unten X', 'X', False,
                                build_ele.BottomXDiameter.value,
                                build_ele.BottomXSpacing.value,
-                               build_ele.BottomXCover.value,
                                build_ele.BottomXSteelGrade.value)
         bottom_y = LayerConfig('Bewehrung unten Y', 'Y', False,
                                build_ele.BottomYDiameter.value,
                                build_ele.BottomYSpacing.value,
-                               build_ele.BottomYCover.value,
                                build_ele.BottomYSteelGrade.value)
         top_x = LayerConfig('Bewehrung oben X', 'X', True,
                             build_ele.TopXDiameter.value,
                             build_ele.TopXSpacing.value,
-                            build_ele.TopXCover.value,
                             build_ele.TopXSteelGrade.value)
         top_y = LayerConfig('Bewehrung oben Y', 'Y', True,
                             build_ele.TopYDiameter.value,
                             build_ele.TopYSpacing.value,
-                            build_ele.TopYCover.value,
                             build_ele.TopYSteelGrade.value)
 
         if build_ele.SameDiameterForAll.value:
@@ -556,8 +550,13 @@ class SlabReinforcement():
         top_x.allplan_layer = build_ele.LayerTopX.value
         top_y.allplan_layer = build_ele.LayerTopY.value
 
-        # lichte Abstände der Stabunterkanten zur Plattenunterkante (z=0);
-        # die äußere Richtung liegt direkt auf/unter der Deckung
+        # Höhenlage der Stabachsen über Plattenunterkante — Formeln aus dem
+        # Deckenplatte-PythonPart des Anwenders (z1..z4): die äußere Richtung
+        # liegt direkt auf bzw. unter der Betondeckung, die innere darüber
+        # bzw. darunter. Eine einzige Betondeckung gilt für alle Lagen und
+        # für die Stabenden (Seitendeckung).
+        cover = self.concrete_cover
+
         if build_ele.OuterLayerDirection.value == 'X-Richtung':
             bottom_outer, bottom_inner = bottom_x, bottom_y
             top_outer, top_inner = top_x, top_y
@@ -565,23 +564,23 @@ class SlabReinforcement():
             bottom_outer, bottom_inner = bottom_y, bottom_x
             top_outer, top_inner = top_y, top_x
 
-        bottom_outer.z_clear = bottom_outer.cover
-        bottom_inner.z_clear = bottom_inner.cover + bottom_outer.diameter
-        top_outer.z_clear = self.thickness - top_outer.cover - top_outer.diameter
-        top_inner.z_clear = self.thickness - top_inner.cover - top_outer.diameter - top_inner.diameter
+        bottom_outer.z_axis = cover + bottom_outer.diameter / 2.0
+        bottom_inner.z_axis = cover + bottom_outer.diameter + bottom_inner.diameter / 2.0
+        top_outer.z_axis = self.thickness - cover - top_outer.diameter / 2.0
+        top_inner.z_axis = self.thickness - cover - top_outer.diameter - top_inner.diameter / 2.0
 
         layers = [bottom_outer, bottom_inner, top_inner, top_outer]
 
-        # Plausibilität der Höhenlagen: bei dünner Platte und großen
-        # Durchmessern können sich obere und untere Lagen durchdringen oder
-        # aus der Platte herausfallen — betroffene obere Lagen entfallen dann
-        # mit Warnung, statt falsche Bewehrung zu erzeugen
-        bottom_layer_top = bottom_inner.z_clear + bottom_inner.diameter
+        # Plausibilität: bei dünner Platte und großen Durchmessern können
+        # sich obere und untere Lagen durchdringen — betroffene obere Lagen
+        # entfallen dann mit Warnung, statt falsche Bewehrung zu erzeugen
+        bottom_layer_top = bottom_inner.z_axis + bottom_inner.diameter / 2.0
 
         valid_layers = []
 
         for layer in layers:
-            if layer.z_clear < 0 or (layer.is_top and layer.z_clear < bottom_layer_top):
+            if layer.z_axis <= 0 or \
+                    (layer.is_top and layer.z_axis - layer.diameter / 2.0 < bottom_layer_top):
                 print(f'SlabReinforcement: Lage "{layer.name}" entfällt — '
                       f'Plattendicke {self.thickness} zu gering für die '
                       f'gewählten Deckungen/Durchmesser')
@@ -635,15 +634,25 @@ class SlabReinforcement():
 
             handle_list = HandleList()
 
+        # Alle Elemente sind bereits im globalen Koordinatensystem aufgebaut
+        # (Rechteckmodus über den Absetzpunkt, Kontur-/Elementmodus über die
+        # Originalkoordinaten). placement_point = Nullpunkt setzt sie direkt
+        # ab, statt sie noch einmal an den Mauszeiger zu binden — wie im
+        # offiziellen Beispiel Slab.py.
+        placement_point = AllplanGeo.Point3D()
+
         if self.build_ele.IsPythonPart.value:
             pyp_util = PythonPartUtil()
             pyp_util.add_pythonpart_view_2d3d(model_ele_list)
             pyp_util.add_reinforcement_elements(reinf_ele_list)
 
-            return CreateElementResult(pyp_util.create_pythonpart(self.build_ele), handle_list)
+            return CreateElementResult(pyp_util.create_pythonpart(self.build_ele),
+                                       handle_list,
+                                       placement_point=placement_point)
 
         return CreateElementResult(elements=model_ele_list + reinf_ele_list,
-                                   handles=handle_list)
+                                   handles=handle_list,
+                                   placement_point=placement_point)
 
 
     def _create_view_geometry(self):
@@ -730,21 +739,19 @@ class SlabReinforcement():
                                    cover_end: float) -> AllplanReinf.BendingShape:
         """Gerader Stab in Lagenrichtung.
 
-        Die Höhenlage wird über die "bottom"-Deckung eingestellt: Sie ist der
-        lichte Abstand der Stabunterkante zur Placement-Ebene, analog zur
-        Längsbewehrung im offiziellen BarPlacement-Beispiel.
+        Deckungsmodell wie im Deckenplatte-PythonPart des Anwenders: Die
+        Quer-Betondeckung des Shapes ist 0, die Höhenlage steckt allein in
+        der z-Koordinate der Verlegepunkte (Stabachse, siehe z_axis). Damit
+        liegt die Verlegeachse exakt auf der gewünschten Höhe, und dieselbe
+        Rechnung gilt für Lagenstäbe und Randbügel.
 
-        Das Shape entsteht im lokalen XY-System (Stab entlang lokal X, die
-        bottom-Deckung versetzt in lokal +Y). Die erste 90°-Drehung um X kippt
-        den Deckungsversatz nach global +Z, die zweite Drehung um Z stellt die
-        Stabrichtung ein — wie RotationUtil(90, 0, 90) im BarPlacement-Beispiel.
+        `length` ist das Rohmass (z. B. volle Plattenlänge); cover_start und
+        cover_end kürzen den Stab beidseitig auf das Nettomass.
         """
 
-        model_angles = RotationUtil(90, 0, 0) if layer.direction == 'X' else RotationUtil(90, 0, 90)
+        model_angles = RotationAngles(0, 0, 0) if layer.direction == 'X' else RotationAngles(0, 0, 90)
 
-        cover_props = ConcreteCoverProperties.left_right_bottom(cover_start,
-                                                                cover_end,
-                                                                layer.z_clear)
+        cover_props = ConcreteCoverProperties(cover_start, cover_end, 0.0, 0.0)
 
         # start_hook/end_hook = -1: keine Haken (der Default 0 würde Haken
         # mit automatisch berechneter Länge erzeugen)
@@ -824,7 +831,7 @@ class SlabReinforcement():
         # Anschlusseisen-Überstand zählt dabei zur Segmentlänge dazu, damit
         # der Bewehrungsanschluss an der Kante nicht stillschweigend entfällt
         min_segment_length = max(self.build_ele.MinBarLength.value,
-                                 2 * self.side_cover + 10)
+                                 2 * self.concrete_cover + 10)
 
         lap = self.overlap_factor * layer.diameter
 
@@ -847,8 +854,8 @@ class SlabReinforcement():
                 # Öffnungsrand -> ebenfalls seitliche Deckung (konfigurierbar
                 # über denselben Parameter, bewusst keine Norm-Annahme);
                 # überstehende Anschlusseisen-Enden ohne Deckung
-                cover_start = 0.0 if ae_start else self.side_cover
-                cover_end = 0.0 if ae_end else self.side_cover
+                cover_start = 0.0 if ae_start else self.concrete_cover
+                cover_end = 0.0 if ae_end else self.concrete_cover
 
                 shape = self._create_straight_bar_shape(layer,
                                                         run_to - run_from + ae_start + ae_end,
@@ -857,16 +864,16 @@ class SlabReinforcement():
                 run_origin = run_from - ae_start
 
                 if layer.direction == 'X':
-                    from_pnt = self._pnt(run_origin, band.dist_from)
-                    to_pnt = self._pnt(run_origin, band.dist_to)
+                    from_pnt = self._pnt(run_origin, band.dist_from, layer.z_axis)
+                    to_pnt = self._pnt(run_origin, band.dist_to, layer.z_axis)
                 else:
-                    from_pnt = self._pnt(band.dist_from, run_origin)
-                    to_pnt = self._pnt(band.dist_to, run_origin)
+                    from_pnt = self._pnt(band.dist_from, run_origin, layer.z_axis)
+                    to_pnt = self._pnt(band.dist_to, run_origin, layer.z_axis)
 
                 # Verteil-Deckung nur an echten Plattenrändern, nicht an
                 # Bandgrenzen mitten in der Platte
-                place_cover_from = self.side_cover if band.dist_from == 0 else 0
-                place_cover_to = self.side_cover if band.dist_to == dist_len else 0
+                place_cover_from = self.concrete_cover if band.dist_from == 0 else 0
+                place_cover_to = self.concrete_cover if band.dist_to == dist_len else 0
 
                 # Randverdichtung nur für Bänder über die volle Plattenbreite,
                 # damit die Zonen an den Plattenrändern (nicht an Bandgrenzen
@@ -924,8 +931,11 @@ class SlabReinforcement():
         bottom_mains = [layer for layer in self.layers if not layer.is_top]
         top_mains = [layer for layer in self.layers if layer.is_top]
 
-        bottom_base = max(layer.z_clear + layer.diameter for layer in bottom_mains) if bottom_mains else None
-        top_base = min(layer.z_clear for layer in top_mains) if top_mains else None
+        # Oberkante der unteren bzw. Unterkante der oberen Hauptbewehrung
+        bottom_base = max(layer.z_axis + layer.diameter / 2.0
+                          for layer in bottom_mains) if bottom_mains else None
+        top_base = min(layer.z_axis - layer.diameter / 2.0
+                       for layer in top_mains) if top_mains else None
 
         edge_layers = []
 
@@ -943,16 +953,15 @@ class SlabReinforcement():
                                          direction, is_top,
                                          edge_diameter,
                                          bar_spacing,
-                                         main_layer.cover,
                                          main_layer.steel_grade)
 
                 if is_top:
-                    edge_layer.z_clear = top_base - (stack_index + 1) * edge_diameter
+                    edge_layer.z_axis = top_base - (stack_index + 0.5) * edge_diameter
                 else:
-                    edge_layer.z_clear = bottom_base + stack_index * edge_diameter
+                    edge_layer.z_axis = bottom_base + (stack_index + 0.5) * edge_diameter
 
-                if edge_layer.z_clear < 0 or \
-                        (is_top and bottom_base is not None and edge_layer.z_clear < bottom_base):
+                if edge_layer.z_axis <= 0 or \
+                        (is_top and bottom_base is not None and edge_layer.z_axis < bottom_base):
                     print(f'SlabReinforcement: Zulage "{edge_layer.name}" entfällt — '
                           f'kein Platz innerhalb der Hauptlagen')
                     continue
@@ -979,19 +988,19 @@ class SlabReinforcement():
 
             for run in compute_edge_bar_runs(dist_len, run_len, opening_dist_with_margin,
                                              opening_run, lap_length, zone_width):
-                cover_start = self.side_cover if run.run_from == 0 else 0
-                cover_end = self.side_cover if run.run_to == run_len else 0
+                cover_start = self.concrete_cover if run.run_from == 0 else 0
+                cover_end = self.concrete_cover if run.run_to == run_len else 0
 
                 shape = self._create_straight_bar_shape(edge_layer,
                                                         run.run_to - run.run_from,
                                                         cover_start, cover_end)
 
                 if edge_layer.direction == 'X':
-                    from_pnt = self._pnt(run.run_from, run.dist_from)
-                    to_pnt = self._pnt(run.run_from, run.dist_to)
+                    from_pnt = self._pnt(run.run_from, run.dist_from, edge_layer.z_axis)
+                    to_pnt = self._pnt(run.run_from, run.dist_to, edge_layer.z_axis)
                 else:
-                    from_pnt = self._pnt(run.dist_from, run.run_from)
-                    to_pnt = self._pnt(run.dist_to, run.run_from)
+                    from_pnt = self._pnt(run.dist_from, run.run_from, edge_layer.z_axis)
+                    to_pnt = self._pnt(run.dist_to, run.run_from, edge_layer.z_axis)
 
                 placements.append(
                     LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
@@ -1045,19 +1054,19 @@ class SlabReinforcement():
                         shape = self._create_straight_bar_shape(layer, 2 * lap, 0, 0)
 
                         if direction == 'X':
-                            from_pnt = self._pnt(run_pos, dist_from)
-                            to_pnt = self._pnt(run_pos, dist_to)
+                            from_pnt = self._pnt(run_pos, dist_from, layer.z_axis)
+                            to_pnt = self._pnt(run_pos, dist_to, layer.z_axis)
                         else:
-                            from_pnt = self._pnt(dist_from, run_pos)
-                            to_pnt = self._pnt(dist_to, run_pos)
+                            from_pnt = self._pnt(dist_from, run_pos, layer.z_axis)
+                            to_pnt = self._pnt(dist_to, run_pos, layer.z_axis)
 
                         placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
                             self._next_position(),
                             shape,
                             from_pnt,
                             to_pnt,
-                            self.side_cover if dist_from == 0 else 0,
-                            self.side_cover if dist_to == dist_len else 0,
+                            self.concrete_cover if dist_from == 0 else 0,
+                            self.concrete_cover if dist_to == dist_len else 0,
                             layer.spacing)
 
                         self._set_placement_layer(placement, layer.allplan_layer)
@@ -1096,9 +1105,11 @@ class SlabReinforcement():
 
             diameter = bottom_layer.diameter
 
-            # Außenmaß über beide Lagen, auf ganze cm abgerundet; für den
-            # ShapeBuilder wird das Achsmaß (Außenmaß − Ø) übergeben
-            outer_height = (top_layer.z_clear + top_layer.diameter) - bottom_layer.z_clear
+            # Außenmaß über beide Lagen (UK untere Lage bis OK obere Lage),
+            # auf ganze cm abgerundet; für den ShapeBuilder wird das Achsmaß
+            # (Außenmaß − Ø) übergeben
+            outer_height = (top_layer.z_axis + top_layer.diameter / 2.0) - \
+                           (bottom_layer.z_axis - bottom_layer.diameter / 2.0)
             web_height = int(outer_height / 10.0) * 10.0 - diameter
             leg_length = self.overlap_factor * diameter - 0.5 * diameter
 
@@ -1107,7 +1118,9 @@ class SlabReinforcement():
                       f'Bügelhöhe/Schenkellänge nicht darstellbar')
                 continue
 
-            z_pos = bottom_layer.z_clear + diameter / 2.0
+            # Verlegeachse auf Höhe der Stabachse der unteren Lage — wie im
+            # Deckenplatte-Vorbild (z_lr = z1)
+            z_pos = bottom_layer.z_axis
 
             shape_props = ReinforcementShapeProperties.rebar(
                 diameter, bottom_layer.bending_roller, bottom_layer.steel_grade,
@@ -1134,10 +1147,10 @@ class SlabReinforcement():
 
                 if direction == 'X':
                     angles = RotationAngles(0, -90, -90) if at_start else RotationAngles(0, -90, 90)
-                    edge_pos = self.side_cover if at_start else self.length - self.side_cover
+                    edge_pos = self.concrete_cover if at_start else self.length - self.concrete_cover
                 else:
                     angles = RotationAngles(0, -90, 0) if at_start else RotationAngles(0, -90, 180)
-                    edge_pos = self.side_cover if at_start else self.width - self.side_cover
+                    edge_pos = self.concrete_cover if at_start else self.width - self.concrete_cover
 
                 shape = GeneralShapeBuilder.create_open_stirrup(
                     web_height, leg_length, angles, shape_props, no_cover,
@@ -1149,7 +1162,7 @@ class SlabReinforcement():
 
                 # Verlegestrecke unterbrechen, wo die Öffnung den Randstreifen
                 # (Bügelschenkel-Tiefe ab Kante) schneidet
-                strip_depth = self.side_cover + leg_length
+                strip_depth = self.concrete_cover + leg_length
                 strip_run = (0.0, strip_depth) if at_start else (run_len - strip_depth, run_len)
 
                 for dist_from, dist_to in compute_edge_strip_segments(
@@ -1166,8 +1179,8 @@ class SlabReinforcement():
                         AllplanReinf.BendingShape(shape),
                         from_pnt,
                         to_pnt,
-                        self.side_cover if dist_from == 0 else 0,
-                        self.side_cover if dist_to == dist_len else 0,
+                        self.concrete_cover if dist_from == 0 else 0,
+                        self.concrete_cover if dist_to == dist_len else 0,
                         bottom_layer.spacing)
 
                     self._set_placement_layer(placement, stirrup_layer_id)
@@ -1196,7 +1209,7 @@ class SlabReinforcement():
 
         bars = compute_contour_bars(
             self.contour, self.contour_openings, run_axis,
-            layer.spacing, self.side_cover, min_bar_length,
+            layer.spacing, self.concrete_cover, min_bar_length,
             edge_zone_length=self.edge_zone_length if self.edge_zones_active else 0.0,
             edge_zone_spacing=self.edge_zone_spacing if self.edge_zones_active else 0.0)
 
@@ -1205,7 +1218,7 @@ class SlabReinforcement():
         for run in group_bars_into_runs(bars):
             for seg_from, seg_to in run.segments:
                 shape = self._create_straight_bar_shape(layer, seg_to - seg_from,
-                                                        self.side_cover, self.side_cover)
+                                                        self.concrete_cover, self.concrete_cover)
 
                 first, last = run.positions[0], run.positions[-1]
 
@@ -1215,11 +1228,11 @@ class SlabReinforcement():
                     window = layer.spacing / 2.0
 
                     if run_axis == 0:
-                        from_pnt = self._pnt(seg_from, first - window)
-                        to_pnt = self._pnt(seg_from, first + window)
+                        from_pnt = self._pnt(seg_from, first - window, layer.z_axis)
+                        to_pnt = self._pnt(seg_from, first + window, layer.z_axis)
                     else:
-                        from_pnt = self._pnt(first - window, seg_from)
-                        to_pnt = self._pnt(first + window, seg_from)
+                        from_pnt = self._pnt(first - window, seg_from, layer.z_axis)
+                        to_pnt = self._pnt(first + window, seg_from, layer.z_axis)
 
                     placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
                         self._next_position(),
@@ -1231,11 +1244,11 @@ class SlabReinforcement():
                         1)
                 else:
                     if run_axis == 0:
-                        from_pnt = self._pnt(seg_from, first)
-                        to_pnt = self._pnt(seg_from, last)
+                        from_pnt = self._pnt(seg_from, first, layer.z_axis)
+                        to_pnt = self._pnt(seg_from, last, layer.z_axis)
                     else:
-                        from_pnt = self._pnt(first, seg_from)
-                        to_pnt = self._pnt(last, seg_from)
+                        from_pnt = self._pnt(first, seg_from, layer.z_axis)
+                        to_pnt = self._pnt(last, seg_from, layer.z_axis)
 
                     placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
                         self._next_position(),
