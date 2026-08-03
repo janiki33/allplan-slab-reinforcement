@@ -14,7 +14,8 @@ keine Kopie kommerzieller Plugins.
 | v0.2 | Rechteckige Öffnung: Kappen der Hauptstäbe, umlaufende Randverstärkung mit konfigurierbarer Übergreifungslänge | umgesetzt |
 | v0.2.1 | Randausbildung je Kante (U-Randbügel / Anschlusseisen / separate Anschlusseisen / keine), Stoßfaktor, „Alle Lagen gleich", wählbare äußere Lagenrichtung, Allplan-Layer je Lage, Handles | umgesetzt |
 | v0.3 | ScriptObject-Struktur mit drei Eingabemodi (Rechteck-Drag / Polygon zeichnen / Element wählen), Scanline-Verlegung für polygonale Konturen, mehrere Öffnungen, Randverdichtung via `calculate_length_of_regions` | umgesetzt |
-| v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Randbügel/Anschlusseisen an Polygonkanten | Roadmap |
+| v0.3.2 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
+| v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Randbügel/Anschlusseisen an Polygonkanten, Diagonalzulagen an Öffnungsecken | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
 Original-Beispiele entwickelt und je Ausbaustufe von einem unabhängigen
@@ -23,9 +24,9 @@ getestet. Beim ersten Live-Test gezielt prüfen:
 
 1. Breite-Handle (6. Argument von `HandleCreator.point_distance` ist ohne
    laufendes Allplan nicht eindeutig belegbar).
-2. Scanline-Einzelstäbe an schrägen Rändern: erwartet wird mittige
-   Platzierung im Verlegefenster (`create_linear_bar_placement_from_to_by_count`
-   mit Stabanzahl 1) — sonst um den halben Stababstand verschoben.
+2. Stufen mit nur einem Stab: erwartet wird mittige Platzierung im
+   Verlegefenster (`create_linear_bar_placement_from_to_by_count` mit
+   Stabanzahl 1) — sonst um den halben Stababstand verschoben.
 3. Elementmodus mit Einzelfundament: liefert `GetGeometryObject()` das
    Shape-Polygon lokal statt global, muss der Absetzpunkt addiert werden.
 
@@ -36,8 +37,9 @@ Library/SlabReinforcement/SlabReinforcement.pyp      Palettendefinition (UI)
 PythonPartsScripts/SlabReinforcement/
     SlabReinforcement.py                             ScriptObject (Eingabemodi) + Placement-Engine
     opening_clipping.py                              Reine Band-/Kapp-Logik Rechteckmodus (ohne Allplan, testbar)
-    contour_placement.py                             Reine Scanline-Logik für polygonale Konturen (ohne Allplan, testbar)
-tests/                                               Unit-Tests beider Geometrie-Module (laufen ohne Allplan)
+    contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
+    lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
+tests/                                               65 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
 ```
 
 ## Installation
@@ -107,8 +109,8 @@ nicht nötig (der Referenzordner hat auch keines).
     gezeichnete Polygon wird als Öffnung interpretiert (größte Fläche =
     Kontur). Verlegung per Scanline: Stablinien werden mit der Kontur und
     allen Öffnungen verschnitten, gleiche aufeinanderfolgende Stäbe zu
-    linearen Placements zusammengefasst, an schrägen Rändern entstehen
-    Einzelstab-Placements.
+    linearen Placements zusammengefasst, schräge Ränder werden abgetreppt
+    (siehe Konzept unten).
   - *Element wählen:* Decke (`Slab`), Boden-/Plattenfundament
     (`SlabFoundationTier`), Einzelfundament (`IndividualFoundation`) oder
     Streifenfundament (`StripFoundation`) wählen. Kontur kommt aus
@@ -123,9 +125,14 @@ nicht nötig (der Referenzordner hat auch keines).
   `LinearBarBuilder.calculate_length_of_regions`, im Scanline-Modus über
   eine äquivalente Positionsberechnung. Verdichtungszonen wirken im
   Rechteckmodus nur auf Bänder über die volle Plattenbreite.
-- **Bewehrung unten / oben:** je Richtung Durchmesser, Stababstand,
-  Betondeckung und Stahlgüte. Mit „Alle Lagen gleicher Durchmesser" gilt
-  eine gemeinsame ø/a-Eingabe für alle vier Lagen.
+- **Bewehrung unten / oben:** je Richtung Durchmesser, Stababstand und
+  Stahlgüte. Mit „Alle Lagen gleicher Durchmesser" gilt eine gemeinsame
+  ø/a-Eingabe für alle vier Lagen. Die **Betondeckung** ist ein einziger
+  Wert für alle Lagen und Stabenden (Seite „Allgemein") — Modell aus
+  deinem Deckenplatte-PythonPart übernommen.
+- **Stösse** (eigene Seite): Übergreifungslänge als Faktor × ø, maximale
+  Stablänge, Versatz benachbarter Stösse und Sperrabstand zu Öffnungen.
+  Konzept und Normbezug siehe unten.
 - **Seiten** (Konzept aus dem Deckenplatte-PythonPart des Anwenders
   übernommen): je Plattenkante wählbar —
   „Randbügel" (offene U-Steckbügel über beide Lagen der senkrecht
@@ -158,21 +165,21 @@ das ist die übliche Live-Vorschau von Standard-PythonParts.
 
 ### Höhenlagen-Konvention
 
-Die Höhenlage jedes Stabes wird über die „bottom"-Deckung der
-`ConcreteCoverProperties` gesteuert (lichter Abstand Stabunterkante zur
-Placement-Ebene z = 0 = Plattenunterkante), analog zur Längsbewehrung im
-offiziellen `BarPlacement`-Beispiel:
+Die Höhenlage jedes Stabes steckt in der z-Koordinate der Verlegepunkte
+(Stabachse); die Quer-Betondeckung des Shapes ist 0. Dieses Modell stammt
+aus deinem Deckenplatte-PythonPart und ergibt mit einer einzigen
+Betondeckung `c` (äussere Richtung = die unter „Verlegung" gewählte):
 
-- unten X: `cover_unten`
-- unten Y: `cover_unten + Ø(unten X)`
-- oben X: `Dicke − cover_oben − Ø(oben X)`
-- oben Y: `Dicke − cover_oben − Ø(oben X) − Ø(oben Y)`
+- unten aussen: `c + ø/2`
+- unten innen:  `c + ø_aussen + ø/2`
+- oben aussen:  `Dicke − c − ø/2`
+- oben innen:   `Dicke − c − ø_aussen − ø/2`
 
 Randverstärkungs-Zulagen liegen als eigene Ebenen innerhalb der Hauptlagen
 (unten oberhalb der inneren unteren Lage, oben unterhalb der inneren oberen
 Lage; X- und Y-Zulagen gestapelt), damit sich keine Stäbe durchdringen.
-Lagen, für die die Plattendicke nicht ausreicht, entfallen mit einer Meldung
-im Trace-Fenster statt falsch erzeugt zu werden.
+Lagen, für die die Plattendicke nicht ausreicht, entfallen mit einer
+Meldung im Trace-Fenster statt falsch erzeugt zu werden.
 
 ## Konzept: Stösse, Schrägen, Öffnungen (Schweizer Praxis / SIA 262)
 
