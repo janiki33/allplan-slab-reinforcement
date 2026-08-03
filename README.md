@@ -51,6 +51,52 @@ tests/                                               Unit-Tests beider Geometrie
 
 Tests ohne Allplan: `python3 -m unittest discover -s tests`
 
+> **Nach jeder Änderung an der `.py` muss Allplan neu gestartet werden.**
+> Allplan lädt ein Skript nur beim ersten Start und hält es danach im
+> Speicher: *„When the PythonPart is started for the second time, it's not
+> loaded again … It stays in the memory until ALLPLAN is closed"*
+> ([Getting started, Abschnitt Reloader](https://pythonparts.allplan.com/2026/manual/getting_started/)).
+> `.pyp`-Dateien werden dagegen bei jedem Start neu gelesen — deshalb kann
+> die Palette bereits neu aussehen, während noch das alte Skript läuft.
+> (Mit installiertem PythonParts-SDK übernimmt der `reloader` das Neuladen.)
+
+## Fehlersuche
+
+**Trace-Fenster einschalten** (zeigt `print()`-Ausgaben und Python-Tracebacks):
+`Strg+F3` → *„Write into window"* ankreuzen → **Allplan neu starten**
+(die Ausgabe erscheint erst nach dem Neustart). Optional zusätzlich
+*„Write into file"* → `allplan_python.out` im TMP-Verzeichnis
+(Allmenu → Service → File explorer → *My own temporary CAD data (TMP)*).
+
+Beim Start des PythonParts sollte im Trace stehen:
+
+```
+Load SlabReinforcement.py (Version 0.3.1)
+SlabReinforcement 0.3.1: create_script_object
+SlabReinforcement: start_input, Modus "Polygon zeichnen"
+```
+
+- **Keine dieser Zeilen:** Allplan lädt eine andere/alte Datei → Punkt
+  „Doppelte Skriptdateien" unten.
+- **Andere Versionsnummer:** altes Skript im Speicher → Allplan neu starten.
+- **Traceback statt der Zeilen:** die Fehlermeldung zeigt die Ursache.
+
+**Doppelte Skriptdateien:** Allplan sucht die `.py` der Reihe nach in
+`Prg`, `Etc`, `Std`, `Usr`, `Prj` und nimmt die **erste** gefundene. Eine
+vergessene Kopie an früherer Stelle überschattet die neue dauerhaft. Prüfen
+mit `dir /s /B SlabReinforcement.py` über das Allplan-Verzeichnis; alle
+Dubletten bis auf die gewollte löschen. Ebenso einen eventuell
+mitkopierten `__pycache__`-Ordner im Zielverzeichnis löschen.
+
+**Import der Nachbarmodule:** `SlabReinforcement.py` liegt im gleichnamigen
+Ordner. Ein absoluter Import (`from SlabReinforcement.contour_placement …`)
+scheitert daher, sobald Allplan das Skript selbst als Modul
+`SlabReinforcement` lädt (*„is not a package"*). Deshalb wird — wie im
+offiziellen Beispiel `ArchitectureExamples/Objects/DoorOpening.py`
+(`from .OpeningBase import OpeningBase`) — der **relative** Import benutzt,
+mit `sys.path`-Fallback für den anderen Ladefall. Ein `__init__.py` ist
+nicht nötig (der Referenzordner hat auch keines).
+
 ## Bedienung / Parameter
 
 - **Eingabemodus** (Seite „Geometrie"):
