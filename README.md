@@ -17,9 +17,17 @@ keine Kopie kommerzieller Plugins.
 | v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Randbügel/Anschlusseisen an Polygonkanten | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
-Original-Beispiele entwickelt und von einem unabhängigen Review gegen die
-Spezifikation geprüft (u. a. Rotationswinkel der Shapes und Hook-Defaults),
-aber noch nicht in einer laufenden Allplan-Installation getestet.
+Original-Beispiele entwickelt und je Ausbaustufe von einem unabhängigen
+Review geprüft, aber noch nicht in einer laufenden Allplan-Installation
+getestet. Beim ersten Live-Test gezielt prüfen:
+
+1. Breite-Handle (6. Argument von `HandleCreator.point_distance` ist ohne
+   laufendes Allplan nicht eindeutig belegbar).
+2. Scanline-Einzelstäbe an schrägen Rändern: erwartet wird mittige
+   Platzierung im Verlegefenster (`create_linear_bar_placement_from_to_by_count`
+   mit Stabanzahl 1) — sonst um den halben Stababstand verschoben.
+3. Elementmodus mit Einzelfundament: liefert `GetGeometryObject()` das
+   Shape-Polygon lokal statt global, muss der Absetzpunkt addiert werden.
 
 ## Dateistruktur
 

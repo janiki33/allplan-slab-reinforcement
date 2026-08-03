@@ -152,18 +152,23 @@ def scan_positions(start: float,
                  and 2 * edge_zone_length < end - start)
 
     if not use_zones:
-        count = int((end - start) / spacing)
-        return [start + i * spacing for i in range(count + 1)]
+        count = int((end - start) / spacing + 1e-9)
+        positions = [start + i * spacing for i in range(count + 1)]
+    else:
+        positions = [start]
 
-    positions = [start]
+        regions = ((start + edge_zone_length, edge_zone_spacing),
+                   (end - edge_zone_length, spacing),
+                   (end, edge_zone_spacing))
 
-    regions = ((start + edge_zone_length, edge_zone_spacing),
-               (end - edge_zone_length, spacing),
-               (end, edge_zone_spacing))
+        for region_end, region_spacing in regions:
+            while positions[-1] + region_spacing <= region_end + 1e-9:
+                positions.append(positions[-1] + region_spacing)
 
-    for region_end, region_spacing in regions:
-        while positions[-1] + region_spacing <= region_end:
-            positions.append(positions[-1] + region_spacing)
+    # Randstab am fernen Ende ergänzen, wenn das Raster dort nicht aufgeht —
+    # analog zur AdditionalCover-Regel der linearen Placements
+    if end - positions[-1] > 1.0:
+        positions.append(end)
 
     return positions
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import NemAll_Python_ArchElements as AllplanArchEle
 import NemAll_Python_BaseElements as AllplanBaseEle
 import NemAll_Python_Geometry as AllplanGeo
 import NemAll_Python_IFW_ElementAdapter as AllplanEleAdapter
@@ -226,14 +227,15 @@ class SlabReinforcementScript(BaseScriptObject):
 
 
     def on_cancel_function(self) -> OnCancelFunctionResult:
-        """ESC-Behandlung: in der Eingabe abbrechen, sonst Elemente erzeugen."""
+        """ESC-Behandlung: während einer laufenden Eingabe entscheidet der
+        Interactor (bei der Mehrfach-Polygon-Eingabe schließt ESC die Eingabe
+        ab, statt sie zu verwerfen); danach werden die Elemente erzeugt.
+        """
 
-        build_ele = self.build_ele
+        BuildingElementListService.write_to_default_favorite_file([self.build_ele])
 
-        BuildingElementListService.write_to_default_favorite_file([build_ele])
-
-        if build_ele.InputMode.value == build_ele.INPUT_MODE_INPUT:
-            return OnCancelFunctionResult.CANCEL_INPUT
+        if self.script_object_interactor is not None:
+            return self.script_object_interactor.on_cancel_function()
 
         return OnCancelFunctionResult.CREATE_ELEMENTS
 
@@ -241,11 +243,11 @@ class SlabReinforcementScript(BaseScriptObject):
     def modify_element_property(self,
                                 name: str,
                                 _value: Any) -> bool:
-        """Palettenänderungen: Wechsel des Eingabemodus startet die Eingabe neu."""
+        """Palettenänderungen: Wechsel des Eingabemodus startet die Eingabe
+        neu — auch nach bereits abgeschlossener Eingabe.
+        """
 
-        build_ele = self.build_ele
-
-        if name == 'InputMethod' and build_ele.InputMode.value == build_ele.INPUT_MODE_INPUT:
+        if name == 'InputMethod':
             self.start_input()
 
             if self.script_object_interactor is not None:
@@ -277,18 +279,24 @@ class SlabReinforcementScript(BaseScriptObject):
     def _process_selected_element(self):
         """Kontur, Dicke und Höhenlage aus dem gewählten Element übernehmen."""
 
-        element = AllplanBaseEle.GetElement(self.sel_result.sel_element)
+        sel_element = self.sel_result.sel_element
+
+        if sel_element is None or (hasattr(sel_element, 'IsNull') and sel_element.IsNull()):
+            return
+
+        element = AllplanBaseEle.GetElement(sel_element)
 
         geometry = element.GetGeometryObject()
 
-        if hasattr(geometry, 'Points'):
+        # Streifenfundament zuerst prüfen: seine Geometrie ist die Achse —
+        # eine Polylinien-Achse hätte ebenfalls 'Points' und würde sonst
+        # fälschlich als (entartete) Kontur interpretiert
+        if isinstance(element, AllplanArchEle.StripFoundationElement):
+            self._set_contour_from_axis(element, geometry)
+
+        elif hasattr(geometry, 'Points'):
             points = [(p.X, p.Y) for p in geometry.Points]
             self._set_contour_from_loops(split_closed_loops(points))
-
-        elif hasattr(geometry, 'StartPoint') and hasattr(geometry, 'EndPoint'):
-            # Streifenfundament: Geometrie ist die Achse -> Kontur als
-            # Rechteck Achse +/- halbe Breite
-            self._set_contour_from_axis(geometry)
 
         else:
             print('SlabReinforcement: Geometrie des gewählten Elements wird '
@@ -310,20 +318,25 @@ class SlabReinforcementScript(BaseScriptObject):
         self.openings = loops[1:]
 
 
-    def _set_contour_from_axis(self, axis):
-        """Rechteckkontur um eine Streifenfundament-Achse."""
-
-        width = getattr(getattr(self, 'sel_props', None), 'Width', 0.0)
+    def _set_contour_from_axis(self, element, axis):
+        """Rechteckkontur um eine gerade Streifenfundament-Achse."""
 
         try:
-            element = AllplanBaseEle.GetElement(self.sel_result.sel_element)
             width = element.Properties.Width
         except AttributeError:
-            pass
+            width = 0.0
 
         if width <= 0:
             print('SlabReinforcement: Breite des Streifenfundaments nicht '
                   'lesbar — Element wird nicht übernommen')
+            return
+
+        # Polylinien-/Kurvenachsen (mehrteilig, erkennbar an 'Points') werden
+        # noch nicht unterstützt — nur die gerade Linie mit Start-/Endpunkt
+        if hasattr(axis, 'Points') or \
+                not (hasattr(axis, 'StartPoint') and hasattr(axis, 'EndPoint')):
+            print('SlabReinforcement: nur gerade Streifenfundament-Achsen '
+                  'werden unterstützt (Polylinien-Achse: Roadmap v0.4)')
             return
 
         x1, y1 = axis.StartPoint.X, axis.StartPoint.Y
@@ -712,6 +725,14 @@ class SlabReinforcement():
         default = [(from_pnt, to_pnt, layer.spacing, cover_from, cover_to)]
 
         if not self.edge_zones_active:
+            return default
+
+        # Zonen nur, wenn zwischen beiden Verdichtungszonen noch ein
+        # Mittelfeld verbleibt — sonst würden sich die Regionen überlappen
+        distribution_length = ((to_pnt.X - from_pnt.X) ** 2 +
+                               (to_pnt.Y - from_pnt.Y) ** 2) ** 0.5 - cover_from - cover_to
+
+        if 2 * self.edge_zone_length >= distribution_length:
             return default
 
         value_list = [(self.edge_zone_length, self.edge_zone_spacing, layer.diameter),

@@ -539,7 +539,7 @@
     </Parameters>
   </Page>
   <Page>
-    <Name>HiddenPage</Name>
+    <Name>__HiddenPage__</Name>
     <Text/>
     <Parameters>
       <Parameter>

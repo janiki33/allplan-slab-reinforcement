@@ -62,7 +62,14 @@ class ScanPositionsTest(unittest.TestCase):
     def test_zones_disabled_when_too_short(self):
         positions = scan_positions(0, 500, 200, edge_zone_length=300, edge_zone_spacing=100)
 
-        self.assertEqual(positions, [0, 200, 400])
+        # Raster + ergänzter Randstab am fernen Ende
+        self.assertEqual(positions, [0, 200, 400, 500])
+
+    def test_end_bar_added_when_grid_does_not_fit(self):
+        self.assertEqual(scan_positions(0, 1000, 300), [0, 300, 600, 900, 1000])
+
+    def test_no_duplicate_end_bar_when_grid_fits(self):
+        self.assertEqual(scan_positions(0, 1000, 250), [0, 250, 500, 750, 1000])
 
 
 class ComputeContourBarsTest(unittest.TestCase):
@@ -103,12 +110,21 @@ class ComputeContourBarsTest(unittest.TestCase):
 class GroupBarsIntoRunsTest(unittest.TestCase):
 
     def test_rectangle_collapses_to_single_run(self):
-        bars = compute_contour_bars(RECT, [], 0, 150, 25, 300)
+        # 0..4000 mit Abstand 200 geht exakt auf -> ein einziger Lauf
+        bars = compute_contour_bars(RECT, [], 0, 200, 0, 300)
         runs = group_bars_into_runs(bars)
 
         self.assertEqual(len(runs), 1)
         self.assertEqual(len(runs[0].positions), len(bars))
-        self.assertEqual(runs[0].spacing, 150)
+        self.assertEqual(runs[0].spacing, 200)
+
+    def test_rectangle_with_rest_creates_end_bar_run(self):
+        # 25..3975 mit Abstand 150 geht nicht auf -> Hauptlauf + Randstab
+        bars = compute_contour_bars(RECT, [], 0, 150, 25, 300)
+        runs = group_bars_into_runs(bars)
+
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(runs[1].positions, [3975])
 
     def test_l_shape_creates_two_runs(self):
         bars = compute_contour_bars(L_SHAPE, [], 0, 500, 0, 300)
