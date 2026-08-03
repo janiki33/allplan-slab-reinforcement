@@ -11,7 +11,8 @@ from contour_placement import (_round_outward, bar_parallel_breaks,
                                compute_contour_bars, decompose_into_zones,
                                edge_setback, group_bars_into_runs,
                                group_bars_into_steps, loop_area, loop_bbox,
-                               scan_positions, split_closed_loops)
+                               parallel_edges, scan_positions,
+                               split_closed_loops)
 
 RECT = [(0, 0), (5000, 0), (5000, 4000), (0, 4000)]
 
@@ -472,6 +473,57 @@ class EdgeExtensionTest(unittest.TestCase):
         self.assertEqual(compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0),
                          compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
                                               edge_extensions={}))
+
+
+class ParallelEdgeCoverTest(unittest.TestCase):
+    """Im Deckungsstreifen einer stabparallelen Kante darf kein Stab liegen."""
+
+    def test_parallel_edges_of_the_l_shape(self):
+        # Stäbe in X (run_axis 0) -> parallel sind die Kanten mit konstantem y
+        edges = sorted(parallel_edges(L_SHAPE, 0))
+
+        self.assertEqual(edges, [(0.0, 0.0, 5000.0),
+                                 (2000.0, 3000.0, 5000.0),
+                                 (4000.0, 0.0, 3000.0)])
+
+    def test_no_bar_inside_the_cover_of_a_reentrant_edge(self):
+        bars = compute_contour_bars(L_SHAPE, [], 0, 195, 30, 200,
+                                    dist_margin=30)
+
+        for bar in bars:
+            if abs(bar.position - 2000) >= 30:
+                continue
+
+            for seg_from, seg_to in bar.segments:
+                # Kein Segment darf über die Kante y=2000 (x 3000..5000) reichen
+                self.assertLessEqual(seg_from, 3000)
+                self.assertLessEqual(seg_to, 3000)
+
+    def test_bar_is_clipped_not_dropped(self):
+        # y = 30 + 10*195 = 1980 liegt 20 mm unter der Kante y=2000 und wird
+        # bei x=3000 abgeschnitten statt komplett zu entfallen.
+        bars = {bar.position: bar.segments
+                for bar in compute_contour_bars(L_SHAPE, [], 0, 195, 30, 200,
+                                                dist_margin=30)}
+
+        self.assertEqual(bars[1980], ((30.0, 3000.0),))
+        self.assertEqual(bars[1785], ((30.0, 4970.0),))
+
+    def test_full_width_bars_are_kept(self):
+        # Ein Stab weit weg von der einspringenden Kante bleibt vollständig
+        bars = compute_contour_bars(L_SHAPE, [], 0, 100, 30, 200,
+                                    dist_margin=30)
+        positions = [bar.position for bar in bars]
+
+        self.assertIn(1030.0, positions)
+
+    def test_rectangle_is_unaffected(self):
+        with_filter = compute_contour_bars(RECT, [], 0, 250, 30, 200,
+                                           dist_margin=30)
+
+        self.assertTrue(with_filter)
+        self.assertAlmostEqual(with_filter[0].position, 30.0)
+        self.assertAlmostEqual(with_filter[-1].position, 3970.0)
 
 
 if __name__ == '__main__':

@@ -415,6 +415,16 @@ Deckung. Für spitze Winkel begrenzt `MaxEdgeSetback` (Default 150 mm) den
 Rückversatz, damit Stäbe in spitzen Ecken nicht unbrauchbar kurz werden.
 Öffnungsränder erhalten dieselbe Behandlung.
 
+**Kanten parallel zur Stabrichtung:** Auch dort gilt die Deckung. Für die
+äusseren Ränder erledigt das der Randabstand der Stabachsen
+(`Deckung + ø/2`). Bei einspringenden Kanten (L-Form, Vorsprünge) liegt
+eine solche Kante mitten im Scanraster — ein Stab, der in deren
+Deckungsstreifen fiele, wird auf der Ausdehnung dieser Kante
+**abgeschnitten** (nicht ganz verworfen), damit der übrige Plattenbereich
+bewehrt bleibt. Öffnungen sind davon ausgenommen: ein durchgehender Stab
+soll nicht wegen einer kleinen Aussparung entfallen, dort greift die
+Öffnungsrandbewehrung.
+
 ### 6. Öffnungen — Zulagen
 
 Auch hier gibt es **in SIA 262 keine Regel** zur Zulagebewehrung um

@@ -245,6 +245,49 @@ def scan_positions(start: float,
     return positions
 
 
+def parallel_edges(loop: Loop, run_axis: int,
+                   tol: float = 1e-6) -> list[tuple[float, float, float]]:
+    """Kanten, die **parallel** zur Stabrichtung verlaufen.
+
+    Returns:
+        Liste (dist-Koordinate der Kante, Ausdehnung von, Ausdehnung bis)
+        auf der run-Achse.
+    """
+
+    dist_axis = 1 - run_axis
+    edges: list[tuple[float, float, float]] = []
+
+    for i, p1 in enumerate(loop):
+        p2 = loop[(i + 1) % len(loop)]
+
+        if abs(p1[dist_axis] - p2[dist_axis]) > tol:
+            continue
+
+        run_from, run_to = sorted((p1[run_axis], p2[run_axis]))
+
+        if run_to - run_from > tol:
+            edges.append((p1[dist_axis], run_from, run_to))
+
+    return edges
+
+
+def _parallel_cover_holes(position: float,
+                          edges: list[tuple[float, float, float]],
+                          margin: float,
+                          tol: float = 1e-6) -> list[Interval]:
+    """Sperrbereiche auf der run-Achse für eine Scan-Position.
+
+    Liegt die Position innerhalb der Betondeckung einer stabparallelen
+    Kante, darf der Stab auf deren Ausdehnung nicht verlaufen — er wird
+    dort abgeschnitten statt komplett zu entfallen, damit der Rest der
+    Platte weiter bewehrt bleibt.
+    """
+
+    return [(edge_from, edge_to)
+            for coord, edge_from, edge_to in edges
+            if abs(position - coord) < margin - tol]
+
+
 class ContourBar(NamedTuple):
     """Eine Stablinie: Scan-Koordinate + Segmente auf der Stabachse."""
 
@@ -288,13 +331,22 @@ def compute_contour_bars(contour: Loop,
 
     bars: list[ContourBar] = []
 
+    # Plattenkanten parallel zur Stabrichtung sperren ihren Deckungsstreifen:
+    # dort darf kein Stab liegen. Für die bbox-Ränder erledigt das bereits
+    # margin, für einspringende Kanten (L-Form, Vorsprünge) nicht.
+    # Öffnungen sind hier bewusst ausgenommen — ein durchgehender Stab soll
+    # nicht wegen einer kleinen Aussparung ganz entfallen; dort greift die
+    # Öffnungsrandbewehrung.
+    blocking_edges = parallel_edges(contour, run_axis)
+
     for position in scan_positions(dist_min, dist_max, spacing,
                                    edge_zone_length, edge_zone_spacing):
         intervals = _intervals_at(contour, run_axis, position,
                                   side_cover, max_setback,
                                   extensions=edge_extensions)
 
-        holes: list[Interval] = []
+        holes: list[Interval] = _parallel_cover_holes(position, blocking_edges,
+                                                      margin)
         for opening in openings:
             holes += _intervals_at(opening, run_axis, position,
                                    side_cover, max_setback, as_hole=True)
