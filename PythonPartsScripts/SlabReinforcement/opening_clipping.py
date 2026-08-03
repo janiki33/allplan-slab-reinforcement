@@ -160,7 +160,8 @@ def compute_edge_bar_runs(dist_len: float,
                           opening_dist: tuple[float, float],
                           opening_run: tuple[float, float],
                           lap_length: float,
-                          zone_width: float) -> list[EdgeBarRun]:
+                          zone_width: float,
+                          dist_margin: float = 0.0) -> list[EdgeBarRun]:
     """Berechnet die beiden Randverstärkungs-Scharen parallel zur run-Achse
     (eine vor, eine hinter der Öffnung, bezogen auf die dist-Achse).
 
@@ -181,16 +182,20 @@ def compute_edge_bar_runs(dist_len: float,
 
     runs: list[EdgeBarRun] = []
 
+    # Die Zulagen dürfen nicht auf der Plattenkante liegen: dist_margin
+    # hält den Abstand zum Rand (Betondeckung)
+    low, high = dist_margin, dist_len - dist_margin
+
     # Zone vor der Öffnung (kleinere dist-Werte)
-    zone_to = min(opening_dist[0], dist_len)
-    zone_from = max(zone_to - zone_width, 0.0)
-    if 0.0 <= zone_from < zone_to:
+    zone_to = min(opening_dist[0], high)
+    zone_from = max(zone_to - zone_width, low)
+    if low <= zone_from < zone_to:
         runs.append(EdgeBarRun(r0, r1, zone_from, zone_to))
 
     # Zone hinter der Öffnung (größere dist-Werte)
-    zone_from = max(opening_dist[1], 0.0)
-    zone_to = min(zone_from + zone_width, dist_len)
-    if zone_from < zone_to <= dist_len:
+    zone_from = max(opening_dist[1], low)
+    zone_to = min(zone_from + zone_width, high)
+    if zone_from < zone_to <= high:
         runs.append(EdgeBarRun(r0, r1, zone_from, zone_to))
 
     return runs

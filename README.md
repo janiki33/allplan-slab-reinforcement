@@ -34,8 +34,9 @@ getestet. Beim ersten Live-Test gezielt prüfen:
 
 ```
 Library/SlabReinforcement/SlabReinforcement.pyp      Palettendefinition (UI)
-PythonPartsScripts/SlabReinforcement/
-    SlabReinforcementScript.py                       ScriptObject (Eingabemodi) + Placement-Engine
+PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modul)
+    __init__.py                                      stellt check_allplan_version/create_script_object bereit
+    slab_reinforcement.py                            ScriptObject (Eingabemodi) + Placement-Engine
     opening_clipping.py                              Reine Band-/Kapp-Logik Rechteckmodus (ohne Allplan, testbar)
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
@@ -44,12 +45,24 @@ tests/                                               65 Unit-Tests der drei Geom
 
 ## Installation
 
-1. `Library/SlabReinforcement/` nach `...\std\Library\SlabReinforcement\` kopieren
-   (alternativ in den `usr`-Pfad).
-2. `PythonPartsScripts/SlabReinforcement/` nach `...\std\PythonPartsScripts\SlabReinforcement\`
-   kopieren (der `<Script><Name>`-Pfad in der `.pyp` ist relativ zum
-   `PythonPartsScripts`-Ordner).
-3. In Allplan: Bibliothek → Standard → SlabReinforcement starten.
+1. `Library/SlabReinforcement/` nach `...\Std\Library\SlabReinforcement\` kopieren
+   (alternativ in den `Usr`- oder `Prj`-Pfad).
+2. `PythonPartsScripts/SlabReinforcement/` **komplett** (mit `__init__.py`)
+   nach `...\Std\PythonPartsScripts\SlabReinforcement\` kopieren.
+   **Wichtig:** Den Ordner `PythonPartsScripts` legt Allplan **nicht**
+   automatisch an — er muss ggf. selbst erstellt werden. Die `.py`-Dateien
+   gehören **nicht** neben die `.pyp` in den `Library`-Baum; das sind zwei
+   getrennte Verzeichnisbäume.
+3. Den konkreten Pfad findest du über Allmenu → *Service* → *File explorer*.
+   Allplan sucht in der Reihenfolge **Prj → Std → Usr** und nimmt die erste
+   Fundstelle. `Etc` und `Prg` gehören Allplan — dort nichts ablegen.
+4. In Allplan: Bibliothek → Standard → SlabReinforcement starten.
+
+Die `.pyp` verweist auf `<Name>SlabReinforcement.py</Name>` — **diese Datei
+gibt es bewusst nicht.** Weil der gleichnamige Ordner ein `__init__.py`
+enthält, behandelt Python ihn als Modul. Das ist die offiziell empfohlene
+Struktur für PythonParts mit mehreren Modulen
+([Key components → File locations](https://pythonparts.allplan.com/2026/manual/key_components/)).
 
 Tests ohne Allplan: `python3 -m unittest discover -s tests`
 
@@ -73,8 +86,8 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
 Beim Start des PythonParts sollte im Trace stehen:
 
 ```
-Load SlabReinforcementScript.py (Version 0.3.2)
-SlabReinforcement 0.3.2: create_script_object
+Load slab_reinforcement.py (Version 0.3.3)
+SlabReinforcement 0.3.3: create_script_object
 SlabReinforcement: start_input, Modus "Polygon zeichnen"
 ```
 
@@ -90,19 +103,18 @@ mit `dir /s /B SlabReinforcement*.py` über das Allplan-Verzeichnis; alle
 Dubletten bis auf die gewollte löschen. Ebenso einen eventuell
 mitkopierten `__pycache__`-Ordner im Zielverzeichnis löschen.
 
-**Skriptname ≠ Ordnername:** Das Skript heisst `SlabReinforcementScript.py`
-und liegt im Ordner `SlabReinforcement`. Hiess es gleich wie sein Ordner,
-meldete Allplan `Script SlabReinforcement.SlabReinforcement not found` —
-in keinem offiziellen Beispiel trägt ein Skript den Namen seines
-Ordners. Wird die Struktur geändert, muss der `<Script><Name>`-Eintrag der
-`.pyp` mitgezogen werden.
+**`Script … not found`:** Diese Meldung heisst, dass Allplan die `.py`
+nicht in einem seiner Suchverzeichnisse findet. Häufigste Ursachen:
+der Ordner `Std\PythonPartsScripts` existiert nicht (Allplan legt ihn nicht
+an), die `.py` liegt versehentlich neben der `.pyp` im `Library`-Baum, oder
+im `<Script><Name>` steht ein **führender** Backslash. Ein Fehler *im*
+Skript zeigt sich dagegen als Traceback im Trace-Fenster.
 
-**Import der Nachbarmodule:** `_load_helper_modules()` probiert der Reihe
-nach den relativen Import (wie `ArchitectureExamples/Objects/DoorOpening.py`
-mit `from .OpeningBase import OpeningBase`), dann den flachen Import über
-`sys.path`, dann das direkte Laden über den Dateipfad. Damit funktioniert
-das Skript unabhängig davon, wie Allplan es lädt; ein `__init__.py` ist
-nicht nötig (der Referenzordner hat auch keines).
+**Import der Nachbarmodule:** Das Paket-`__init__.py` macht den Ordner zum
+Modul, dadurch funktionieren die relativen Importe zuverlässig. Zusätzlich
+probiert `_load_helper_modules()` bei Bedarf den flachen Import über
+`sys.path` und das Laden über den Dateipfad — alle drei Wege sind lokal
+verifiziert.
 
 ## Bedienung / Parameter
 

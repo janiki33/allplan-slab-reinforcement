@@ -141,11 +141,11 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.3.2'
+SCRIPT_VERSION = '0.3.3'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
-print(f'Load SlabReinforcementScript.py (Version {SCRIPT_VERSION})')
+print(f'Load slab_reinforcement.py (Version {SCRIPT_VERSION})')
 
 # Optionen der Seiten-Combos (müssen den ValueList-Einträgen der .pyp entsprechen)
 SIDE_STIRRUP = 'Randbügel'
@@ -544,6 +544,7 @@ class SlabReinforcement():
 
         # Stösse
         self.max_bar_length = build_ele.MaxBarLength.value
+        self._lap_warning_shown = False
         self.stagger_active = build_ele.StaggerLaps.value
         self.stagger_factor = build_ele.StaggerFactor.value
         self.lap_opening_margin = build_ele.LapOpeningMargin.value
@@ -900,8 +901,10 @@ class SlabReinforcement():
         # beidseitige Deckung + 10 mm Reststab) entfallen ersatzlos; ein
         # Anschlusseisen-Überstand zählt dabei zur Segmentlänge dazu, damit
         # der Bewehrungsanschluss an der Kante nicht stillschweigend entfällt
+        # compute_placement_bands prüft gegen das Rohmass, der Stab wird
+        # danach noch um beidseitige Deckung kürzer -> Deckung aufschlagen
         min_segment_length = max(self.build_ele.MinBarLength.value,
-                                 2 * self.concrete_cover + 10)
+                                 10.0) + 2 * self.concrete_cover
 
         lap = self.overlap_factor * layer.diameter
 
@@ -963,10 +966,21 @@ class SlabReinforcement():
                                 place_cover_from, place_cover_to)]
 
                 for region_from, region_to, spacing, region_cover_from, region_cover_to in regions:
-                    for sub_spacing, sub_cover_from, shift in self._stagger_regions(
-                            spacing, region_cover_from, layer):
-                        for piece_from, piece_to in self._lap_pieces((net_from, net_to),
-                                                                     layer, shift, zones):
+                    # Ohne Stoss keine Aufteilung in gerade/ungerade Stäbe
+                    unstaggered = self._lap_pieces((net_from, net_to), layer, 0.0, zones)
+
+                    groups = self._stagger_regions(region_from, region_to, spacing,
+                                                   region_cover_from, region_cover_to,
+                                                   layer, len(unstaggered) > 1)
+
+                    for sub_cover_from, sub_spacing, sub_count, shift in groups:
+                        if sub_count is not None and sub_count <= 0:
+                            continue
+
+                        pieces = self._lap_pieces((net_from, net_to), layer, shift, zones) \
+                            if shift else unstaggered
+
+                        for piece_from, piece_to in pieces:
                             piece_shape = self._create_straight_bar_shape(
                                 layer, piece_to - piece_from, 0.0, 0.0)
 
@@ -975,14 +989,28 @@ class SlabReinforcement():
                             else:
                                 offset = AllplanGeo.Point3D(0, piece_from, 0)
 
-                            placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
-                                self._next_position(),
-                                piece_shape,
-                                region_from + offset,
-                                region_to + offset,
-                                sub_cover_from,
-                                region_cover_to,
-                                sub_spacing)
+                            if sub_count is None:
+                                placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                                    self._next_position(),
+                                    piece_shape,
+                                    region_from + offset,
+                                    region_to + offset,
+                                    sub_cover_from,
+                                    region_cover_to,
+                                    sub_spacing)
+                            else:
+                                # Versetzte Gruppen über Startpunkt/Abstand/Anzahl,
+                                # damit der erste Stab exakt auf seiner Position
+                                # liegt und beide Gruppen ein geschlossenes Raster
+                                # bilden
+                                placement = LinearBarBuilder.create_linear_bar_placement_from_by_dist_count(
+                                    self._next_position(),
+                                    piece_shape,
+                                    region_from + offset,
+                                    region_to + offset,
+                                    sub_cover_from,
+                                    sub_spacing,
+                                    sub_count)
 
                             self._set_placement_layer(placement, layer.allplan_layer)
                             placements.append(placement)
@@ -1074,30 +1102,36 @@ class SlabReinforcement():
                                         opening_dist[1] + edge_margin)
 
             for run in compute_edge_bar_runs(dist_len, run_len, opening_dist_with_margin,
-                                             opening_run, lap_length, zone_width):
+                                             opening_run, lap_length, zone_width,
+                                             dist_margin=self.concrete_cover
+                                             + edge_layer.diameter / 2.0):
                 cover_start = self.concrete_cover if run.run_from == 0 else 0
                 cover_end = self.concrete_cover if run.run_to == run_len else 0
 
-                shape = self._create_straight_bar_shape(edge_layer,
-                                                        run.run_to - run.run_from,
-                                                        cover_start, cover_end)
+                # Zulagen können ebenfalls zu lang für einen Stab werden
+                net = (run.run_from + cover_start, run.run_to - cover_end)
 
-                if edge_layer.direction == 'X':
-                    from_pnt = self._pnt(run.run_from, run.dist_from, edge_layer.z_axis)
-                    to_pnt = self._pnt(run.run_from, run.dist_to, edge_layer.z_axis)
-                else:
-                    from_pnt = self._pnt(run.dist_from, run.run_from, edge_layer.z_axis)
-                    to_pnt = self._pnt(run.dist_to, run.run_from, edge_layer.z_axis)
+                for piece_from, piece_to in self._lap_pieces(net, edge_layer, 0.0, []):
+                    shape = self._create_straight_bar_shape(edge_layer,
+                                                            piece_to - piece_from,
+                                                            0.0, 0.0)
 
-                placements.append(
-                    LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
-                        self._next_position(),
-                        shape,
-                        from_pnt,
-                        to_pnt,
-                        0,
-                        0,
-                        bar_count))
+                    if edge_layer.direction == 'X':
+                        from_pnt = self._pnt(piece_from, run.dist_from, edge_layer.z_axis)
+                        to_pnt = self._pnt(piece_from, run.dist_to, edge_layer.z_axis)
+                    else:
+                        from_pnt = self._pnt(run.dist_from, piece_from, edge_layer.z_axis)
+                        to_pnt = self._pnt(run.dist_to, piece_from, edge_layer.z_axis)
+
+                    placements.append(
+                        LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
+                            self._next_position(),
+                            shape,
+                            from_pnt,
+                            to_pnt,
+                            0,
+                            0,
+                            bar_count))
 
         return placements
 
@@ -1301,7 +1335,8 @@ class SlabReinforcement():
             layer.spacing, self.concrete_cover, min_bar_length,
             edge_zone_length=self.edge_zone_length if self.edge_zones_active else 0.0,
             edge_zone_spacing=self.edge_zone_spacing if self.edge_zones_active else 0.0,
-            max_setback=self.max_edge_setback)
+            max_setback=self.max_edge_setback,
+            dist_margin=self.concrete_cover + layer.diameter / 2.0)
 
         placements: list[AllplanReinf.BarPlacement] = []
 
@@ -1310,15 +1345,23 @@ class SlabReinforcement():
         # kürzer wird als geometrisch möglich
         for run in group_bars_into_steps(bars,
                                          max_step_loss=self.step_max_loss,
-                                         length_raster=self.step_length_raster):
+                                         length_raster=self.step_length_raster,
+                                         min_bar_length=min_bar_length):
+            zones = self._lap_forbidden_zones(run_axis, run.positions)
+
             for segment in run.segments:
-                zones = self._lap_forbidden_zones(run_axis, run.positions)
+                # Ohne Stoss keine Aufteilung in gerade/ungerade Stäbe
+                unstaggered = self._lap_pieces(segment, layer, 0.0, zones)
 
                 # Stossversatz: gerade und ungerade Stäbe des Laufes werden
                 # getrennt verlegt (doppelter Abstand), damit die Stösse
                 # benachbarter Stäbe zueinander versetzt liegen
-                for positions, shift in self._stagger_groups(run.positions, layer):
-                    for piece in self._lap_pieces(segment, layer, shift, zones):
+                for positions, shift in self._stagger_groups(run.positions, layer,
+                                                             len(unstaggered) > 1):
+                    pieces = self._lap_pieces(segment, layer, shift, zones) \
+                        if shift else unstaggered
+
+                    for piece in pieces:
                         placements.append(
                             self._place_contour_piece(layer, run_axis, piece, positions))
 
@@ -1329,17 +1372,19 @@ class SlabReinforcement():
 
     def _stagger_groups(self,
                         positions: list[float],
-                        layer: LayerConfig) -> list[tuple[list[float], float]]:
+                        layer: LayerConfig,
+                        has_laps: bool) -> list[tuple[list[float], float]]:
         """Teilt einen Verlegelauf für den Stossversatz auf.
 
-        Ohne Versatz (oder wenn ohnehin nicht gestossen wird) bleibt es bei
-        einer Gruppe. Sonst werden gerade und ungerade Stäbe getrennt, damit
-        beide Gruppen unterschiedliche Stosslagen bekommen können.
+        Ohne Stoss (oder ohne Versatz) bleibt es bei einer Gruppe — sonst
+        entstünden doppelt so viele Placements ohne Nutzen. Sonst werden
+        gerade und ungerade Stäbe getrennt, damit beide Gruppen
+        unterschiedliche Stosslagen bekommen.
         """
 
         stagger_offset = self.stagger_factor * self.overlap_factor * layer.diameter
 
-        if not self.stagger_active or stagger_offset <= 0 or len(positions) < 2:
+        if not self.stagger_active or stagger_offset <= 0 or len(positions) < 2 or not has_laps:
             return [(positions, 0.0)]
 
         return [(positions[0::2], stagger_shift(0, stagger_offset)),
@@ -1347,27 +1392,48 @@ class SlabReinforcement():
 
 
     def _stagger_regions(self,
+                         region_from: AllplanGeo.Point3D,
+                         region_to: AllplanGeo.Point3D,
                          spacing: float,
                          cover_from: float,
-                         layer: LayerConfig) -> list[tuple[float, float, float]]:
+                         cover_to: float,
+                         layer: LayerConfig,
+                         has_laps: bool) -> list[tuple[float, float, int | None, float]]:
         """Stossversatz im Rechteckmodus.
 
-        Statt eines Placements mit dem Stababstand a entstehen zwei
-        Placements mit 2a — das zweite um a versetzt. Beide bekommen eine
-        eigene Stosslage, sodass in jedem Schnitt höchstens die Hälfte der
-        Stäbe gestossen ist (SIA 262, Ziff. 5.2.6.6).
+        Ohne Stoss (oder ohne Versatz) bleibt es bei einem Placement mit dem
+        normalen Stababstand — Stabanzahl None bedeutet "Verlegung von/bis".
+
+        Mit Stoss entstehen zwei Placements mit doppeltem Stababstand: das
+        zweite um einen Stababstand versetzt, beide mit eigener Stosslage.
+        Damit ist in jedem Schnitt höchstens die Hälfte der Stäbe gestossen
+        (SIA 262, Ziff. 5.2.6.6). Beide Gruppen werden über
+        Startpunkt/Abstand/Anzahl verlegt, damit ihre Stäbe exakt auf dem
+        ursprünglichen Raster liegen.
 
         Returns:
-            Liste (Stababstand, Verteil-Deckung am Anfang, Stossverschiebung)
+            Liste (Deckung am Anfang, Stababstand, Stabanzahl oder None,
+            Stossverschiebung)
         """
 
         stagger_offset = self.stagger_factor * self.overlap_factor * layer.diameter
 
-        if not self.stagger_active or stagger_offset <= 0:
-            return [(spacing, cover_from, 0.0)]
+        if not self.stagger_active or stagger_offset <= 0 or not has_laps or spacing <= 0:
+            return [(cover_from, spacing, None, 0.0)]
 
-        return [(2 * spacing, cover_from, stagger_shift(0, stagger_offset)),
-                (2 * spacing, cover_from + spacing, stagger_shift(1, stagger_offset))]
+        length = ((region_to.X - region_from.X) ** 2 +
+                  (region_to.Y - region_from.Y) ** 2) ** 0.5 - cover_from - cover_to
+
+        if length < 0:
+            return []
+
+        count = int(length / spacing + 1e-9) + 1
+
+        if count < 2:
+            return [(cover_from, spacing, None, 0.0)]
+
+        return [(cover_from, 2 * spacing, (count + 1) // 2, stagger_shift(0, stagger_offset)),
+                (cover_from + spacing, 2 * spacing, count // 2, stagger_shift(1, stagger_offset))]
 
 
     def _lap_pieces(self,
@@ -1380,8 +1446,11 @@ class SlabReinforcement():
         lap_length = self.overlap_factor * layer.diameter
 
         if self.max_bar_length <= lap_length:
-            print(f'SlabReinforcement: max. Stablänge {self.max_bar_length} ist nicht '
-                  f'größer als die Übergreifungslänge {lap_length} — es wird nicht gestossen')
+            if not self._lap_warning_shown:
+                print(f'SlabReinforcement: max. Stablänge {self.max_bar_length} ist nicht '
+                      f'größer als die Übergreifungslänge {lap_length} — es wird nicht gestossen')
+                self._lap_warning_shown = True
+
             return [segment]
 
         return split_with_preferred_joints(segment,
@@ -1433,29 +1502,25 @@ class SlabReinforcement():
         # Nettolänge: die Deckung steckt bereits in den Segmentgrenzen
         shape = self._create_straight_bar_shape(layer, piece_to - piece_from, 0.0, 0.0)
 
-        first, last = positions[0], positions[-1]
+        first = positions[0]
 
-        if len(positions) == 1:
-            # Einzelstab: halben Lagenabstand als Verlegefenster, der Stab
-            # landet mittig exakt auf der Scan-Position
-            window = layer.spacing / 2.0
-            first, last = first - window, first + window
+        # Abstand und Anzahl sind aus den Scan-Positionen exakt bekannt,
+        # deshalb wird über Startpunkt/Abstand/Anzahl verlegt: so liegt der
+        # erste Stab exakt auf der ersten Scan-Position (kein Nachzentrieren
+        # wie bei der from_to-Variante, die bei einem Rest beide Enden
+        # gleichmäßig aufweitet)
+        spacing = (positions[1] - first) if len(positions) > 1 else layer.spacing
 
         if run_axis == 0:
             from_pnt = self._pnt(piece_from, first, layer.z_axis)
-            to_pnt = self._pnt(piece_from, last, layer.z_axis)
+            direction_pnt = self._pnt(piece_from, first + spacing, layer.z_axis)
         else:
             from_pnt = self._pnt(first, piece_from, layer.z_axis)
-            to_pnt = self._pnt(last, piece_from, layer.z_axis)
+            direction_pnt = self._pnt(first + spacing, piece_from, layer.z_axis)
 
-        if len(positions) == 1:
-            placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
-                self._next_position(), shape, from_pnt, to_pnt, 0, 0, 1)
-        else:
-            spacing = (last - first) / (len(positions) - 1)
-
-            placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
-                self._next_position(), shape, from_pnt, to_pnt, 0, 0, spacing)
+        placement = LinearBarBuilder.create_linear_bar_placement_from_by_dist_count(
+            self._next_position(), shape, from_pnt, direction_pnt,
+            0.0, spacing, len(positions))
 
         self._set_placement_layer(placement, layer.allplan_layer)
 

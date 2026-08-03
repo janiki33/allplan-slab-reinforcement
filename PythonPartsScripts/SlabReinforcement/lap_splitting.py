@@ -141,7 +141,8 @@ def _min_distance_to_zones(positions: list[float],
 
         for zone_from, zone_to in zones:
             if zone_from <= position <= zone_to:
-                best_for_position = -min(position - zone_from, zone_to - position)
+                best_for_position = min(best_for_position,
+                                        -min(position - zone_from, zone_to - position))
             else:
                 best_for_position = min(best_for_position,
                                         min(abs(position - zone_from),
@@ -187,8 +188,7 @@ def split_with_preferred_joints(segment: Interval,
                               max(min_piece_length, lap_length))
 
     best_pieces = pieces
-    best_score = (_min_distance_to_zones(joint_positions(pieces, lap_length), zones),
-                  -abs(preferred_shift - preferred_shift))
+    best_score = (_min_distance_to_zones(joint_positions(pieces, lap_length), zones), 0.0)
 
     for index in range(search_steps + 1):
         shift = -limit + (2 * limit) * index / max(search_steps, 1)

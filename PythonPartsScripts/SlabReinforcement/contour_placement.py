@@ -226,8 +226,10 @@ def scan_positions(start: float,
                 positions.append(positions[-1] + region_spacing)
 
     # Randstab am fernen Ende ergänzen, wenn das Raster dort nicht aufgeht —
-    # analog zur AdditionalCover-Regel der linearen Placements
-    if end - positions[-1] > 1.0:
+    # analog zur AdditionalCover-Regel der linearen Placements. Der Zusatzstab
+    # muss mindestens den halben Stababstand entfernt sein, sonst läge er
+    # praktisch auf seinem Nachbarn.
+    if end - positions[-1] > spacing / 2.0:
         positions.append(end)
 
     return positions
@@ -248,7 +250,8 @@ def compute_contour_bars(contour: Loop,
                          min_bar_length: float,
                          edge_zone_length: float = 0.0,
                          edge_zone_spacing: float = 0.0,
-                         max_setback: float = 0.0) -> list[ContourBar]:
+                         max_setback: float = 0.0,
+                         dist_margin: float | None = None) -> list[ContourBar]:
     """Scanline-Verlegung: für jede Scan-Position die Stab-Segmente
     innerhalb der Kontur abzüglich der Öffnungen.
 
@@ -258,15 +261,19 @@ def compute_contour_bars(contour: Loop,
     oben begrenzt durch max_setback). Ränder von Öffnungen erhalten
     dieselbe Deckung.
 
-    side_cover wirkt zusätzlich als Randabstand der Scan-Positionen auf der
-    dist-Achse. Segmente kürzer als min_bar_length entfallen.
+    dist_margin ist der Randabstand der **Stabachsen** auf der dist-Achse
+    (Default: side_cover). Da die Deckung bis zur Staboberfläche gilt,
+    sollte hier side_cover + Stabdurchmesser/2 übergeben werden.
+    Segmente kürzer als min_bar_length entfallen.
     """
 
     dist_axis = 1 - run_axis
     bbox = loop_bbox(contour)
 
-    dist_min = bbox[dist_axis] + side_cover
-    dist_max = bbox[dist_axis + 2] - side_cover
+    margin = side_cover if dist_margin is None else dist_margin
+
+    dist_min = bbox[dist_axis] + margin
+    dist_max = bbox[dist_axis + 2] - margin
 
     bars: list[ContourBar] = []
 
@@ -323,6 +330,7 @@ def _round_inward(seg: Interval, raster: float) -> Interval:
 def group_bars_into_steps(bars: list[ContourBar],
                           max_step_loss: float,
                           length_raster: float = 0.0,
+                          min_bar_length: float = 0.0,
                           tol: float = 1.0) -> list[BarRun]:
     """Fasst Stablinien zu Abtreppungsstufen zusammen.
 
@@ -347,6 +355,8 @@ def group_bars_into_steps(bars: list[ContourBar],
                         Abtreppung (jeder abweichende Stab einzeln)
         length_raster:  Stablängen zusätzlich auf dieses Raster nach innen
                         runden (0 = aus)
+        min_bar_length: Segmente, die nach Vereinheitlichung und Rundung
+                        kürzer sind, entfallen
         tol:            Toleranz für "gleich"
 
     Returns:
@@ -374,6 +384,13 @@ def group_bars_into_steps(bars: list[ContourBar],
 
         if length_raster > 0:
             unified = tuple(_round_inward(seg, length_raster) for seg in unified)
+
+        # Vereinheitlichung und Rundung verkürzen die Stäbe noch einmal —
+        # deshalb hier erneut gegen die Mindestlänge prüfen
+        unified = tuple(seg for seg in unified if seg[1] - seg[0] >= min_bar_length)
+
+        if not unified:
+            return
 
         steps.append(BarRun([bar.position for bar in group], unified))
 

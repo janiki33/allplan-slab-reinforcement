@@ -65,11 +65,16 @@ class ScanPositionsTest(unittest.TestCase):
     def test_zones_disabled_when_too_short(self):
         positions = scan_positions(0, 500, 200, edge_zone_length=300, edge_zone_spacing=100)
 
-        # Raster + ergänzter Randstab am fernen Ende
-        self.assertEqual(positions, [0, 200, 400, 500])
+        # Rest 100 <= halber Stababstand -> kein Zusatzstab
+        self.assertEqual(positions, [0, 200, 400])
 
-    def test_end_bar_added_when_grid_does_not_fit(self):
-        self.assertEqual(scan_positions(0, 1000, 300), [0, 300, 600, 900, 1000])
+    def test_end_bar_added_when_the_rest_is_large_enough(self):
+        # Rest 200 > halber Stababstand (150) -> Randstab am Ende
+        self.assertEqual(scan_positions(0, 1100, 300), [0, 300, 600, 900, 1100])
+
+    def test_no_end_bar_when_the_rest_is_small(self):
+        # Rest 100 <= halber Stababstand -> der Stab läge fast auf dem Nachbarn
+        self.assertEqual(scan_positions(0, 1000, 300), [0, 300, 600, 900])
 
     def test_no_duplicate_end_bar_when_grid_fits(self):
         self.assertEqual(scan_positions(0, 1000, 250), [0, 250, 500, 750, 1000])
@@ -123,13 +128,12 @@ class GroupBarsIntoRunsTest(unittest.TestCase):
         self.assertEqual(len(runs[0].positions), len(bars))
         self.assertEqual(runs[0].spacing, 200)
 
-    def test_rectangle_with_rest_creates_end_bar_run(self):
-        # 25..3975 mit Abstand 150 geht nicht auf -> Hauptlauf + Randstab
+    def test_small_rest_does_not_create_an_extra_run(self):
+        # 25..3975 mit Abstand 150: Rest 50 <= halber Abstand -> ein Lauf
         bars = compute_contour_bars(RECT, [], 0, 150, 25, 300)
         runs = group_bars_into_runs(bars)
 
-        self.assertEqual(len(runs), 2)
-        self.assertEqual(runs[1].positions, [3975])
+        self.assertEqual(len(runs), 1)
 
     def test_l_shape_creates_two_runs(self):
         bars = compute_contour_bars(L_SHAPE, [], 0, 500, 0, 300)
