@@ -37,12 +37,59 @@
           </Parameter>
         </Parameters>
       </Parameter>
+      <Parameter>
+        <Name>PlacementExpander</Name>
+        <Text>Verlegung</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>OuterLayerDirection</Name>
+            <Text>Äußere Lagen</Text>
+            <Value>X-Richtung</Value>
+            <ValueList>X-Richtung|Y-Richtung</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
     </Parameters>
   </Page>
   <Page>
     <Name>BottomLayerPage</Name>
     <Text>Bewehrung unten</Text>
     <Parameters>
+      <Parameter>
+        <Name>AllLayersExpander</Name>
+        <Text>Alle Lagen</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>SameDiameterForAll</Name>
+            <Text>Alle Lagen gleicher Durchmesser</Text>
+            <Value>False</Value>
+            <ValueType>CheckBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>RowAll</Name>
+            <Text>Alle Lagen</Text>
+            <ValueType>Row</ValueType>
+            <Visible>SameDiameterForAll == True</Visible>
+            <Parameters>
+              <Parameter>
+                <Name>DiaAll</Name>
+                <Text>ø</Text>
+                <Value>12</Value>
+                <ValueType>ReinfBarDiameter</ValueType>
+              </Parameter>
+              <Parameter>
+                <Name>SpacingAll</Name>
+                <Text>a</Text>
+                <Value>150</Value>
+                <ValueType>Length</ValueType>
+              </Parameter>
+            </Parameters>
+          </Parameter>
+        </Parameters>
+      </Parameter>
       <Parameter>
         <Name>BottomXExpander</Name>
         <Text>Untere Lage X-Richtung (außen)</Text>
@@ -53,6 +100,7 @@
             <Text>Durchmesser</Text>
             <Value>12</Value>
             <ValueType>ReinfBarDiameter</ValueType>
+            <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
             <Name>BottomXSpacing</Name>
@@ -60,6 +108,7 @@
             <Value>150</Value>
             <MinValue>25</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
             <Name>BottomXCover</Name>
@@ -85,6 +134,7 @@
             <Text>Durchmesser</Text>
             <Value>12</Value>
             <ValueType>ReinfBarDiameter</ValueType>
+            <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
             <Name>BottomYSpacing</Name>
@@ -92,6 +142,7 @@
             <Value>150</Value>
             <MinValue>25</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
             <Name>BottomYCover</Name>
@@ -123,6 +174,7 @@
             <Text>Durchmesser</Text>
             <Value>10</Value>
             <ValueType>ReinfBarDiameter</ValueType>
+            <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
             <Name>TopXSpacing</Name>
@@ -130,6 +182,7 @@
             <Value>150</Value>
             <MinValue>25</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
             <Name>TopXCover</Name>
@@ -155,6 +208,7 @@
             <Text>Durchmesser</Text>
             <Value>10</Value>
             <ValueType>ReinfBarDiameter</ValueType>
+            <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
             <Name>TopYSpacing</Name>
@@ -162,6 +216,7 @@
             <Value>150</Value>
             <MinValue>25</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>SameDiameterForAll == False</Visible>
           </Parameter>
           <Parameter>
             <Name>TopYCover</Name>
@@ -174,6 +229,61 @@
             <Text>Stahlgüte</Text>
             <Value>4</Value>
             <ValueType>ReinfSteelGrade</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+    </Parameters>
+  </Page>
+  <Page>
+    <Name>SidesPage</Name>
+    <Text>Seiten</Text>
+    <Parameters>
+      <Parameter>
+        <Name>OverlapExpander</Name>
+        <Text>Stoß</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>OverlapFactor</Name>
+            <Text>Stoßlänge (x ø)</Text>
+            <Value>50</Value>
+            <MinValue>1</MinValue>
+            <ValueType>Integer</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
+        <Name>SidesExpander</Name>
+        <Text>Randausbildung je Kante</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>SideLeft</Name>
+            <Text>Links (X=0)</Text>
+            <Value>Keine</Value>
+            <ValueList>Randbügel|Anschlusseisen|Separate Anschlusseisen|Keine</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>SideRight</Name>
+            <Text>Rechts (X=Länge)</Text>
+            <Value>Keine</Value>
+            <ValueList>Randbügel|Anschlusseisen|Separate Anschlusseisen|Keine</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>SideBottom</Name>
+            <Text>Unten (Y=0)</Text>
+            <Value>Keine</Value>
+            <ValueList>Randbügel|Anschlusseisen|Separate Anschlusseisen|Keine</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>SideTop</Name>
+            <Text>Oben (Y=Breite)</Text>
+            <Value>Keine</Value>
+            <ValueList>Randbügel|Anschlusseisen|Separate Anschlusseisen|Keine</ValueList>
+            <ValueType>StringComboBox</ValueType>
           </Parameter>
         </Parameters>
       </Parameter>
@@ -316,6 +426,49 @@
             <Text/>
             <Value/>
             <ValueType>CommonProperties</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
+        <Name>LayerExpander</Name>
+        <Text>Layer Bewehrung (0 = aktueller Layer)</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>LayerBottomX</Name>
+            <Text>Layer untere Lage X</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerBottomY</Name>
+            <Text>Layer untere Lage Y</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerTopX</Name>
+            <Text>Layer obere Lage X</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerTopY</Name>
+            <Text>Layer obere Lage Y</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerStirrupX</Name>
+            <Text>Layer Randbügel links/rechts</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerStirrupY</Name>
+            <Text>Layer Randbügel unten/oben</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
           </Parameter>
         </Parameters>
       </Parameter>

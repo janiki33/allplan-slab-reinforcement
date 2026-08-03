@@ -6,6 +6,13 @@ Stabplatzierungen. Optional wird eine rechteckige Öffnung berücksichtigt:
 Die Hauptstäbe werden im Öffnungsbereich gekappt und die Öffnung erhält
 umlaufende Randverstärkungsstäbe.
 
+Je Plattenkante wählbar (Konzept angelehnt an das Deckenplatte-PythonPart
+des Anwenders): offene U-Randbügel, Anschlusseisen (Lagenstäbe stehen um
+die Stoßlänge über den Rand über), separate Anschlusseisen (eigene Stäbe,
+mittig auf der Kante) oder keine Randausbildung. Dazu: wählbare Richtung
+der äußeren Lagen, "alle Lagen gleich"-Modus, Allplan-Layer je Lage und
+Handles für Länge/Breite/Dicke.
+
 Aufbau nach dem Muster der offiziellen Beispiele
 (NemetschekAllplan/PythonPartsExamples, Branch 2026,
 ReinforcementExamples/BarPlacement/BarPlacement.py).
@@ -18,19 +25,30 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import NemAll_Python_BaseElements as AllplanBaseElements
 import NemAll_Python_Geometry as AllplanGeo
 import NemAll_Python_IFW_ElementAdapter as AllplanEleAdapter
 import NemAll_Python_Reinforcement as AllplanReinf
 import StdReinfShapeBuilder.GeneralReinfShapeBuilder as GeneralShapeBuilder
 import StdReinfShapeBuilder.LinearBarPlacementBuilder as LinearBarBuilder
 from CreateElementResult import CreateElementResult
+from HandlePropertiesService import HandlePropertiesService
 from PythonPartUtil import PythonPartUtil
 from StdReinfShapeBuilder.ConcreteCoverProperties import ConcreteCoverProperties
 from StdReinfShapeBuilder.ReinforcementShapeProperties import ReinforcementShapeProperties
+from StdReinfShapeBuilder.RotationAngles import RotationAngles
+from TypeCollections.HandleList import HandleList
 from TypeCollections.ModelEleList import ModelEleList
+from Utils.HandleCreator import HandleCreator
 from Utils.RotationUtil import RotationUtil
 
 from SlabReinforcement.opening_clipping import compute_placement_bands, compute_edge_bar_runs
+
+# Optionen der Seiten-Combos (müssen den ValueList-Einträgen der .pyp entsprechen)
+SIDE_STIRRUP = 'Randbügel'
+SIDE_CONNECT = 'Anschlusseisen'
+SIDE_SEPARATE = 'Separate Anschlusseisen'
+SIDE_NONE = 'Keine'
 
 if TYPE_CHECKING:
     from __BuildingElementStubFiles.SlabReinforcementBuildingElement import \
@@ -59,6 +77,17 @@ def create_element(build_ele: BuildingElement,
     return SlabReinforcement(build_ele, doc).create()
 
 
+def move_handle(build_ele: BuildingElement,
+                handle_prop,
+                input_pnt: AllplanGeo.Point3D,
+                doc: AllplanEleAdapter.DocumentAdapter) -> CreateElementResult:
+    """Handle-Verschiebung: Parameterwert übernehmen und neu aufbauen."""
+
+    HandlePropertiesService.update_property_value(build_ele, handle_prop, input_pnt)
+
+    return create_element(build_ele, doc)
+
+
 @dataclass
 class LayerConfig:
     """Konfiguration einer Bewehrungslage."""
@@ -72,6 +101,7 @@ class LayerConfig:
     steel_grade: int     # Index der Stahlgüte (Allplan-Tabelle)
     z_clear: float = 0.0  # lichter Abstand Stabunterkante zu OK Rohdecke unten (z=0)
     bending_roller: float = 4.0
+    allplan_layer: int = 0  # Allplan-Layer-ID; 0 = aktueller Layer
 
     placements: list = field(default_factory=list)
 
@@ -91,6 +121,13 @@ class SlabReinforcement():
 
         self.side_cover = build_ele.SideCover.value
         self.concrete_grade = build_ele.ConcreteGrade.value
+
+        # Seitenausbildung und Stoßlänge (als Vielfaches des Stabdurchmessers)
+        self.overlap_factor = build_ele.OverlapFactor.value
+        self.side_left = build_ele.SideLeft.value
+        self.side_right = build_ele.SideRight.value
+        self.side_bottom = build_ele.SideBottom.value
+        self.side_top = build_ele.SideTop.value
 
         self.position_counter = 0
 
@@ -118,10 +155,10 @@ class SlabReinforcement():
     def _create_layer_configs(self) -> list[LayerConfig]:
         """Liest die vier Lagen aus der Palette und berechnet ihre Höhenlage.
 
-        Lagenreihenfolge (Konvention dieses PythonParts, siehe README):
-        unten liegt die X-Lage außen (direkt auf der Deckung), die Y-Lage
-        darüber; oben liegt die X-Lage außen (direkt unter der Deckung),
-        die Y-Lage darunter.
+        Welche Richtung außen liegt (direkt auf bzw. unter der Deckung),
+        bestimmt der Palettenparameter "Äußere Lagen"; die jeweils andere
+        Richtung liegt innen. Bei aktivem "Alle Lagen gleich" überschreiben
+        DiaAll/SpacingAll die Einzelwerte aller vier Lagen.
         """
 
         build_ele = self.build_ele
@@ -147,19 +184,37 @@ class SlabReinforcement():
                             build_ele.TopYCover.value,
                             build_ele.TopYSteelGrade.value)
 
-        # lichte Abstände der Stabunterkanten zur Plattenunterkante (z=0):
-        bottom_x.z_clear = bottom_x.cover
-        bottom_y.z_clear = bottom_y.cover + bottom_x.diameter
-        top_x.z_clear = self.thickness - top_x.cover - top_x.diameter
-        top_y.z_clear = self.thickness - top_y.cover - top_x.diameter - top_y.diameter
+        if build_ele.SameDiameterForAll.value:
+            for layer in (bottom_x, bottom_y, top_x, top_y):
+                layer.diameter = float(build_ele.DiaAll.value)
+                layer.spacing = build_ele.SpacingAll.value
 
-        layers = [bottom_x, bottom_y, top_x, top_y]
+        bottom_x.allplan_layer = build_ele.LayerBottomX.value
+        bottom_y.allplan_layer = build_ele.LayerBottomY.value
+        top_x.allplan_layer = build_ele.LayerTopX.value
+        top_y.allplan_layer = build_ele.LayerTopY.value
+
+        # lichte Abstände der Stabunterkanten zur Plattenunterkante (z=0);
+        # die äußere Richtung liegt direkt auf/unter der Deckung
+        if build_ele.OuterLayerDirection.value == 'X-Richtung':
+            bottom_outer, bottom_inner = bottom_x, bottom_y
+            top_outer, top_inner = top_x, top_y
+        else:
+            bottom_outer, bottom_inner = bottom_y, bottom_x
+            top_outer, top_inner = top_y, top_x
+
+        bottom_outer.z_clear = bottom_outer.cover
+        bottom_inner.z_clear = bottom_inner.cover + bottom_outer.diameter
+        top_outer.z_clear = self.thickness - top_outer.cover - top_outer.diameter
+        top_inner.z_clear = self.thickness - top_inner.cover - top_outer.diameter - top_inner.diameter
+
+        layers = [bottom_outer, bottom_inner, top_inner, top_outer]
 
         # Plausibilität der Höhenlagen: bei dünner Platte und großen
         # Durchmessern können sich obere und untere Lagen durchdringen oder
         # aus der Platte herausfallen — betroffene obere Lagen entfallen dann
         # mit Warnung, statt falsche Bewehrung zu erzeugen
-        bottom_layer_top = bottom_y.z_clear + bottom_y.diameter
+        bottom_layer_top = bottom_inner.z_clear + bottom_inner.diameter
 
         valid_layers = []
 
@@ -196,14 +251,55 @@ class SlabReinforcement():
             for placement in self._create_opening_edge_reinforcement():
                 reinf_ele_list.append(placement)
 
+        for placement in self._create_separate_connection_bars():
+            reinf_ele_list.append(placement)
+
+        for placement in self._create_edge_stirrups():
+            reinf_ele_list.append(placement)
+
+        handle_list = self._create_handles()
+
         if self.build_ele.IsPythonPart.value:
             pyp_util = PythonPartUtil()
             pyp_util.add_pythonpart_view_2d3d(model_ele_list)
             pyp_util.add_reinforcement_elements(reinf_ele_list)
 
-            return CreateElementResult(pyp_util.create_pythonpart(self.build_ele))
+            return CreateElementResult(pyp_util.create_pythonpart(self.build_ele), handle_list)
 
-        return CreateElementResult(elements=model_ele_list + reinf_ele_list)
+        return CreateElementResult(elements=model_ele_list + reinf_ele_list,
+                                   handles=handle_list)
+
+
+    def _create_handles(self) -> HandleList:
+        """Zug-Handles für Länge, Breite und Dicke am Plattenursprung."""
+
+        handle_list = HandleList()
+        origin = AllplanGeo.Point3D()
+
+        HandleCreator.point_distance(handle_list, 'SlabLength',
+                                     AllplanGeo.Point3D(self.length, 0, 0), origin,
+                                     True, False, info_text='Länge (X)')
+        HandleCreator.point_distance(handle_list, 'SlabWidth',
+                                     AllplanGeo.Point3D(0, self.width, 0), origin,
+                                     True, False, info_text='Breite (Y)')
+        HandleCreator.point_distance(handle_list, 'SlabThickness',
+                                     AllplanGeo.Point3D(0, 0, self.thickness), origin,
+                                     True, True, info_text='Dicke')
+
+        return handle_list
+
+
+    def _set_placement_layer(self, placement: AllplanReinf.BarPlacement, layer_id: int):
+        """Weist dem Placement einen Allplan-Layer zu (0 = aktueller Layer)."""
+
+        if layer_id <= 0:
+            return
+
+        common_props = AllplanBaseElements.CommonProperties()
+        common_props.GetGlobalProperties()
+        common_props.Layer = layer_id
+
+        placement.SetCommonProperties(common_props)
 
 
     def _create_slab_geometry(self) -> AllplanGeo.Polyhedron3D:
@@ -283,9 +379,11 @@ class SlabReinforcement():
         if layer.direction == 'X':
             run_len, dist_len = self.length, self.width
             opening_run, opening_dist = self.opening_x, self.opening_y
+            side_start, side_end = self.side_left, self.side_right
         else:
             run_len, dist_len = self.width, self.length
             opening_run, opening_dist = self.opening_y, self.opening_x
+            side_start, side_end = self.side_bottom, self.side_top
 
         if not self.has_opening:
             opening_run = opening_dist = None
@@ -302,36 +400,50 @@ class SlabReinforcement():
 
         for band in bands:
             for run_from, run_to in band.run_segments:
+                # Anschlusseisen: Stäbe, die an einer entsprechend
+                # konfigurierten Plattenkante enden, stehen um die Stoßlänge
+                # (Stoßfaktor x Ø) über den Plattenrand über
+                ae_start = self.overlap_factor * layer.diameter \
+                    if run_from == 0 and side_start == SIDE_CONNECT else 0.0
+                ae_end = self.overlap_factor * layer.diameter \
+                    if run_to == run_len and side_end == SIDE_CONNECT else 0.0
+
                 # Deckung an den Stabenden: Plattenrand -> seitliche Deckung,
                 # Öffnungsrand -> ebenfalls seitliche Deckung (konfigurierbar
-                # über denselben Parameter, bewusst keine Norm-Annahme)
-                cover_start = self.side_cover
-                cover_end = self.side_cover
+                # über denselben Parameter, bewusst keine Norm-Annahme);
+                # überstehende Anschlusseisen-Enden ohne Deckung
+                cover_start = 0.0 if ae_start else self.side_cover
+                cover_end = 0.0 if ae_end else self.side_cover
 
-                shape = self._create_straight_bar_shape(layer, run_to - run_from,
+                shape = self._create_straight_bar_shape(layer,
+                                                        run_to - run_from + ae_start + ae_end,
                                                         cover_start, cover_end)
 
+                run_origin = run_from - ae_start
+
                 if layer.direction == 'X':
-                    from_pnt = AllplanGeo.Point3D(run_from, band.dist_from, 0)
-                    to_pnt = AllplanGeo.Point3D(run_from, band.dist_to, 0)
+                    from_pnt = AllplanGeo.Point3D(run_origin, band.dist_from, 0)
+                    to_pnt = AllplanGeo.Point3D(run_origin, band.dist_to, 0)
                 else:
-                    from_pnt = AllplanGeo.Point3D(band.dist_from, run_from, 0)
-                    to_pnt = AllplanGeo.Point3D(band.dist_to, run_from, 0)
+                    from_pnt = AllplanGeo.Point3D(band.dist_from, run_origin, 0)
+                    to_pnt = AllplanGeo.Point3D(band.dist_to, run_origin, 0)
 
                 # Verteil-Deckung nur an echten Plattenrändern, nicht an
                 # Bandgrenzen mitten in der Platte
                 place_cover_from = self.side_cover if band.dist_from == 0 else 0
                 place_cover_to = self.side_cover if band.dist_to == dist_len else 0
 
-                placements.append(
-                    LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
-                        self._next_position(),
-                        shape,
-                        from_pnt,
-                        to_pnt,
-                        place_cover_from,
-                        place_cover_to,
-                        layer.spacing))
+                placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                    self._next_position(),
+                    shape,
+                    from_pnt,
+                    to_pnt,
+                    place_cover_from,
+                    place_cover_to,
+                    layer.spacing)
+
+                self._set_placement_layer(placement, layer.allplan_layer)
+                placements.append(placement)
 
         layer.placements = placements
 
@@ -443,5 +555,141 @@ class SlabReinforcement():
                         0,
                         0,
                         bar_count))
+
+        return placements
+
+
+    def _create_separate_connection_bars(self) -> list[AllplanReinf.BarPlacement]:
+        """Separate Anschlusseisen: eigene gerade Stäbe mit Länge 2 x Stoßlänge,
+        mittig auf der jeweiligen Plattenkante, in Höhe und Raster der Lagen,
+        die senkrecht auf diese Kante zulaufen.
+        """
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        for direction, side_start, side_end in (('X', self.side_left, self.side_right),
+                                                ('Y', self.side_bottom, self.side_top)):
+            run_len, dist_len = (self.length, self.width) if direction == 'X' \
+                else (self.width, self.length)
+
+            for layer in [layer for layer in self.layers if layer.direction == direction]:
+                lap = self.overlap_factor * layer.diameter
+
+                for side_option, at_start in ((side_start, True), (side_end, False)):
+                    if side_option != SIDE_SEPARATE:
+                        continue
+
+                    # Stab steht je zur Hälfte in und außerhalb der Platte
+                    shape = self._create_straight_bar_shape(layer, 2 * lap, 0, 0)
+
+                    run_pos = -lap if at_start else run_len - lap
+
+                    if direction == 'X':
+                        from_pnt = AllplanGeo.Point3D(run_pos, 0, 0)
+                        to_pnt = AllplanGeo.Point3D(run_pos, dist_len, 0)
+                    else:
+                        from_pnt = AllplanGeo.Point3D(0, run_pos, 0)
+                        to_pnt = AllplanGeo.Point3D(dist_len, run_pos, 0)
+
+                    placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                        self._next_position(),
+                        shape,
+                        from_pnt,
+                        to_pnt,
+                        self.side_cover,
+                        self.side_cover,
+                        layer.spacing)
+
+                    self._set_placement_layer(placement, layer.allplan_layer)
+                    placements.append(placement)
+
+        return placements
+
+
+    def _create_edge_stirrups(self) -> list[AllplanReinf.BarPlacement]:
+        """Offene U-Randbügel (Steckbügel) entlang der gewählten Plattenkanten.
+
+        Der Bügel umgreift die beiden Lagen, deren Stäbe senkrecht auf die
+        Kante zulaufen: Außenmaß = Abstand Unterkante untere Lage bis
+        Oberkante obere Lage (auf ganze cm abgerundet), Schenkellänge =
+        Stoßlänge − Ø/2 (Achsmaß), Ø/Abstand/Stahlgüte von der unteren Lage.
+        Rotationswinkel wie im Deckenplatte-Vorbild: Ry=-90 stellt den Steg
+        vertikal, Rz richtet die Schenkel nach innen.
+        """
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        for direction, edge_options in (('X', ((self.side_left, True), (self.side_right, False))),
+                                        ('Y', ((self.side_bottom, True), (self.side_top, False)))):
+            if all(option != SIDE_STIRRUP for option, _ in edge_options):
+                continue
+
+            direction_layers = [layer for layer in self.layers if layer.direction == direction]
+            bottom_layer = next((layer for layer in direction_layers if not layer.is_top), None)
+            top_layer = next((layer for layer in direction_layers if layer.is_top), None)
+
+            if bottom_layer is None or top_layer is None:
+                print(f'SlabReinforcement: Randbügel {direction} entfallen — '
+                      f'zugehörige Lagen sind nicht vorhanden')
+                continue
+
+            diameter = bottom_layer.diameter
+
+            # Außenmaß über beide Lagen, auf ganze cm abgerundet; für den
+            # ShapeBuilder wird das Achsmaß (Außenmaß − Ø) übergeben
+            outer_height = (top_layer.z_clear + top_layer.diameter) - bottom_layer.z_clear
+            web_height = int(outer_height / 10.0) * 10.0 - diameter
+            leg_length = self.overlap_factor * diameter - 0.5 * diameter
+
+            if web_height <= 0 or leg_length <= 0:
+                print(f'SlabReinforcement: Randbügel {direction} entfallen — '
+                      f'Bügelhöhe/Schenkellänge nicht darstellbar')
+                continue
+
+            z_pos = bottom_layer.z_clear + diameter / 2.0
+
+            shape_props = ReinforcementShapeProperties.rebar(
+                diameter, bottom_layer.bending_roller, bottom_layer.steel_grade,
+                self.concrete_grade, AllplanReinf.BendingShapeType.OpenStirrup)
+
+            no_cover = ConcreteCoverProperties(0.0, 0.0, 0.0, 0.0)
+
+            stirrup_layer_id = self.build_ele.LayerStirrupX.value if direction == 'X' \
+                else self.build_ele.LayerStirrupY.value
+
+            for side_option, at_start in edge_options:
+                if side_option != SIDE_STIRRUP:
+                    continue
+
+                if direction == 'X':
+                    angles = RotationAngles(0, -90, -90) if at_start else RotationAngles(0, -90, 90)
+                    x_pos = self.side_cover if at_start else self.length - self.side_cover
+                    from_pnt = AllplanGeo.Point3D(x_pos, 0, z_pos)
+                    to_pnt = AllplanGeo.Point3D(x_pos, self.width, z_pos)
+                else:
+                    angles = RotationAngles(0, -90, 0) if at_start else RotationAngles(0, -90, 180)
+                    y_pos = self.side_cover if at_start else self.width - self.side_cover
+                    from_pnt = AllplanGeo.Point3D(0, y_pos, z_pos)
+                    to_pnt = AllplanGeo.Point3D(self.length, y_pos, z_pos)
+
+                shape = GeneralShapeBuilder.create_open_stirrup(
+                    web_height, leg_length, angles, shape_props, no_cover,
+                    -1, -1, 0.0, 0.0)
+
+                if not shape.IsValid():
+                    print(f'SlabReinforcement: Randbügel-Shape {direction} ungültig — übersprungen')
+                    continue
+
+                placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                    self._next_position(),
+                    shape,
+                    from_pnt,
+                    to_pnt,
+                    self.side_cover,
+                    self.side_cover,
+                    bottom_layer.spacing)
+
+                self._set_placement_layer(placement, stirrup_layer_id)
+                placements.append(placement)
 
         return placements

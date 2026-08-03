@@ -12,6 +12,7 @@ keine Kopie kommerzieller Plugins.
 |---|---|---|
 | v0.1 | Rechteckplatte, 4 Lagen (Ø, Abstand, Deckung, Stahlgüte je Lage), Palette, Live-Vorschau, PythonPart-Erzeugung | umgesetzt |
 | v0.2 | Rechteckige Öffnung: Kappen der Hauptstäbe, umlaufende Randverstärkung mit konfigurierbarer Übergreifungslänge | umgesetzt |
+| v0.2.1 | Randausbildung je Kante (U-Randbügel / Anschlusseisen / separate Anschlusseisen / keine), Stoßfaktor, „Alle Lagen gleich", wählbare äußere Lagenrichtung, Allplan-Layer je Lage, Handles | umgesetzt |
 | v0.3 | Polygonale Platten (Interactor-Eingabe / Slab-Selektion), mehrere Öffnungen | Roadmap, s. u. |
 | v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
 
@@ -43,14 +44,26 @@ Tests ohne Allplan: `python3 -m unittest discover -s tests`
 
 ## Bedienung / Parameter
 
-- **Geometrie:** Länge/Breite/Dicke der (vorerst rechteckigen) Platte.
+- **Geometrie:** Länge/Breite/Dicke der (vorerst rechteckigen) Platte,
+  dazu Handles am Plattenursprung für Länge/Breite/Dicke. Unter „Verlegung"
+  ist wählbar, ob die X- oder die Y-Lagen außen liegen (die Expander-Titel
+  „außen/innen" beziehen sich auf die Voreinstellung X außen).
 - **Bewehrung unten / oben:** je Richtung Durchmesser, Stababstand,
-  Betondeckung und Stahlgüte. Konvention: X-Lage liegt jeweils außen
-  (unten zuerst verlegt, oben zuoberst), Y-Lage innen.
+  Betondeckung und Stahlgüte. Mit „Alle Lagen gleicher Durchmesser" gilt
+  eine gemeinsame ø/a-Eingabe für alle vier Lagen.
+- **Seiten** (Konzept aus dem Deckenplatte-PythonPart des Anwenders
+  übernommen): je Plattenkante wählbar —
+  „Randbügel" (offene U-Steckbügel über beide Lagen der senkrecht
+  zulaufenden Richtung; Außenhöhe auf ganze cm abgerundet, Schenkellänge =
+  Stoßlänge − ø/2), „Anschlusseisen" (Lagenstäbe stehen um die Stoßlänge
+  über den Rand über), „Separate Anschlusseisen" (eigene Stäbe der Länge
+  2 × Stoßlänge, mittig auf der Kante) oder „Keine". Die Stoßlänge ist als
+  Stoßfaktor (Vielfaches von ø) konfigurierbar — bewusst kein Normwert.
 - **Öffnung:** eine rechteckige Öffnung über Lage und Abmessung; Zulagen
   (Anzahl, Ø, Abstand) und Übergreifungslänge sind frei konfigurierbar.
 - **Allgemein:** Betongüte, seitliche Deckung, Mindeststablänge (kürzere
   Reststücke neben Öffnungen entfallen ersatzlos), Format-Eigenschaften,
+  Allplan-Layer je Lage und für die Randbügel (0 = aktueller Layer),
   „Als PythonPart erzeugen".
 
 Bei jeder Parameteränderung ruft Allplan `create_element` neu auf —
