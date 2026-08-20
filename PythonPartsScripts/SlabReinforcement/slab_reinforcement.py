@@ -72,14 +72,14 @@ def _load_helper_modules():
     """
 
     names = ('contour_placement', 'lap_splitting', 'opening_clipping',
-             'opening_reinforcement', 'state_persistence')
+             'opening_reinforcement', 'state_persistence', 'lap_planning')
 
     try:
-        from . import (contour_placement, lap_splitting,        # noqa: F401
-                       opening_clipping, opening_reinforcement,
-                       state_persistence)
+        from . import (contour_placement, lap_planning,          # noqa: F401
+                       lap_splitting, opening_clipping,
+                       opening_reinforcement, state_persistence)
         return (contour_placement, lap_splitting, opening_clipping,
-                opening_reinforcement, state_persistence)
+                opening_reinforcement, state_persistence, lap_planning)
     except Exception as relative_error:                # noqa: BLE001
         first_error = relative_error
 
@@ -126,8 +126,8 @@ def _load_helper_modules():
     return tuple(modules)
 
 
-_contour_placement, _lap_splitting, _opening_clipping, _opening_reinforcement, \
-    _state_persistence = _load_helper_modules()
+(_contour_placement, _lap_splitting, _opening_clipping,
+ _opening_reinforcement, _state_persistence, _lap_planning) = _load_helper_modules()
 
 compute_contour_bars = _contour_placement.compute_contour_bars
 decompose_into_zones = _contour_placement.decompose_into_zones
@@ -151,13 +151,15 @@ group_equal_bars = _opening_reinforcement.group_equal_bars
 outward_normals = _opening_reinforcement.outward_normals
 point_in_loop = _opening_reinforcement.point_in_loop
 
+plan_layer_laps = _lap_planning.plan_layer
+
 if TYPE_CHECKING:
     from __BuildingElementStubFiles.SlabReinforcementBuildingElement import \
         SlabReinforcementBuildingElement as BuildingElement  # type: ignore
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.6.0'
+SCRIPT_VERSION = '0.7.0'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -886,12 +888,14 @@ class SlabReinforcement():
         self.step_max_loss = build_ele.StepMaxLoss.value
         self.step_length_raster = build_ele.StepLengthRaster.value
 
-        # Woran wird die Länge einer Abtreppungsstufe gemessen? Am längsten
-        # Stab ragen die kürzeren um bis zu StepMaxLoss über ihre eigene
-        # Länge hinaus — also in die seitliche Deckung hinein. Am kürzesten
-        # bleibt jeder Stab im Beton.
-        self.step_reference = SHORTEST \
-            if build_ele.StepMeasuredAt.value == 'Kürzestes Eisen' else LONGEST
+        # Passeisen-Grenze: ab dieser Länge enthält jedes Eisen mindestens
+        # einen Stoss (Bürosystematik, bestätigt am Studienblatt)
+        self.pass_bar_threshold = build_ele.PassBarThreshold.value
+
+        # Mindestlänge eines Abtreppungsstücks: unterschreitet das kürzeste
+        # Stufenstück diesen Wert, rutscht die ganze Stosslinie nach innen
+        self.step_min_piece = build_ele.StepMinPieceLength.value
+
         self.max_edge_setback = build_ele.MaxEdgeSetback.value
 
         # Variante A: Rechteckgrenzen fluchten über die Bänder hinweg,
@@ -2472,28 +2476,26 @@ class SlabReinforcement():
             dist_margin=self.concrete_cover + layer.diameter / 2.0,
             edge_extensions=self._edge_extensions(layer))
 
-        # Schritt 1: Zerlegung in Rechtecke und Abtreppungszonen
-        zones = decompose_into_zones(bars, self.contour, run_axis,
-                                     max_step_deviation=self.step_max_loss,
-                                     length_raster=self.step_length_raster,
-                                     min_bar_length=min_bar_length,
-                                     snap_to_contour=self.snap_rect_to_contour,
-                                     step_reference=self.step_reference)
+        # Stossplanung nach Bürosystematik (lap_planning.py): minimale
+        # Verlegungsanzahl, Fluchten, Passeisen-Regel, eine Stosslinie je
+        # Abtreppung — die Stufenbildung selbst bleibt wie bisher
+        lap_length = self.overlap_factor * layer.diameter
 
-        # Schritt 2: Übergreifung an jeder Verlegungsgrenze längs der Stäbe
-        zones = apply_boundary_laps(zones, self.overlap_factor * layer.diameter)
+        groups = plan_layer_laps(
+            bars, self.contour, self.contour_openings, run_axis,
+            lmax=self.max_bar_length,
+            lap=lap_length,
+            pass_threshold=self.pass_bar_threshold,
+            step_deviation=self.step_max_loss,
+            raster=self.step_length_raster,
+            min_piece=self.step_min_piece,
+            min_bar=min_bar_length)
 
-        # Schritt 3: je Zone eine Verlegung; ein Stab, der immer noch länger
-        # als die zulässige Stablänge ist, wird zusätzlich gestossen
         placements: list[AllplanReinf.BarPlacement] = []
 
-        for zone in zones:
-            forbidden = self._lap_forbidden_zones(run_axis, zone.positions)
-
-            for segment in zone.segments[0]:
-                for piece in self._lap_pieces(segment, layer, 0.0, forbidden):
-                    placements.append(
-                        self._place_contour_piece(layer, run_axis, piece, zone.positions))
+        for positions, piece in groups:
+            placements.append(
+                self._place_contour_piece(layer, run_axis, piece, positions))
 
         layer.placements = placements
 

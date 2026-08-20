@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -108,16 +108,16 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>StepMeasuredAt</Name>
-            <Text>Stufe vermessen an</Text>
-            <Value>Längstes Eisen</Value>
-            <ValueList>Längstes Eisen|Kürzestes Eisen</ValueList>
-            <ValueType>StringComboBox</ValueType>
-          </Parameter>
-          <Parameter>
             <Name>StepMaxLoss</Name>
             <Text>Max. Längenabweichung je Stab</Text>
             <Value>250</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>StepMinPieceLength</Name>
+            <Text>Mindestlänge Abtreppungsstück</Text>
+            <Value>2000</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
           </Parameter>
@@ -374,6 +374,13 @@
         <Text>Automatische Stösse</Text>
         <ValueType>Expander</ValueType>
         <Parameters>
+          <Parameter>
+            <Name>PassBarThreshold</Name>
+            <Text>Passeisen-Grenze (mind. ein Stoss ab)</Text>
+            <Value>3000</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
+          </Parameter>
           <Parameter>
             <Name>MaxBarLength</Name>
             <Text>Max. Stablänge</Text>

@@ -18,7 +18,8 @@ keine Kopie kommerzieller Plugins.
 | v0.4 | Verlegekonzept über Rechteckzerlegung (Rechtecke je Lage, Stoss an jeder Verlegungsgrenze, Abtreppung am längsten Stab), Randbügel und Anschlusseisen auch im Polygon-/Elementmodus | umgesetzt |
 | v0.5 | Aussparungs-Werkzeug: Rand-, Diagonal- und Bügelzulagen um beliebige Aussparungspolygone, Erkennung der Aussparungselemente ohne Antippen | umgesetzt |
 | v0.6 | Aussparungen werden über Palettenbuttons **hinzugefügt** statt vorab festgelegt: beliebig viele, jederzeit, einzeln wieder entfernbar | umgesetzt |
-| v0.7 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
+| v0.7 | Neue Stoss-Systematik nach Bürostandard (14-Formen-Studienblatt): minimale Verlegungsanzahl, Fluchten, Passeisen-Grenze, eine Stosslinie je Abtreppung | umgesetzt |
+| v0.8 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
 Original-Beispiele entwickelt und je Ausbaustufe von einem unabhängigen
@@ -45,7 +46,8 @@ PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modu
     opening_reinforcement.py                         Reine Geometrie der Aussparungsbewehrung (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
     state_persistence.py                             Sichert die eingegebene Geometrie ins PythonPart (ohne Allplan, testbar)
-tests/                                               114 Unit-Tests der vier Geometriemodule (laufen ohne Allplan)
+    lap_planning.py                                  Stossplanung nach Bürosystematik (ohne Allplan, testbar)
+tests/                                               Unit-Tests der Geometriemodule (laufen ohne Allplan)
 tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
 tools/Sync-SlabReinforcement.ps1                     Sync GitHub → lokales Allplan-Verzeichnis (Windows)
 ```
@@ -544,6 +546,36 @@ beiden Hauptrichtungen), die Diagonalen in einer dritten. So durchdringen
 sich weder Zulagen untereinander noch Zulagen und Hauptlagen. Ist zwischen
 den Hauptlagen kein Platz mehr, entfällt die Ebene mit einer Meldung im
 Trace-Fenster statt zu kollidieren.
+
+## Stoss-Systematik (Bürostandard)
+
+Abgenommen am interaktiven 14-Formen-Studienblatt. Leitsatz: **minimale
+Anzahl Verlegungen — Stösse selbst kosten nichts.** Kein Stossraster.
+
+1. **Überlänge:** Stäbe über `MaxBarLength` werden gleichmässig geteilt
+   (13 m → mittig, 19 m → gedrittelt), Stösse äquidistant.
+2. **Passeisen-Grenze** (`PassBarThreshold`, Default 3 m): jedes Eisen ab
+   dieser Länge enthält mindestens einen Stoss — nie ein exakt
+   geschnittenes Passeisen; die Teilstücke lassen sich stattdessen
+   schieben. Kürzere Eisen dürfen Passeisen sein.
+3. **Fluchten:** Aussparungskanten und einspringende Ecken quer zur
+   Stabrichtung sind bevorzugte Stossachsen und laufen durch die ganze
+   Platte (Aussparung → 4 Verlegungen: links/rechts/darüber/darunter).
+   Eine Eck-Flucht entfällt, wenn die kurze Seite ohnehin mittig
+   gestossen wird (≥ Passeisen-Grenze) — dann spart sie keine Verlegung.
+4. **Abtreppung:** je Bereich **eine gerade Stosslinie**, geerbt vom
+   Pflichtstoss der vollen Bahnen; sie rutscht parallel nach innen, bis
+   jedes Stufenstück die `StepMinPieceLength` (Default 2 m) erreicht.
+   Ein abgetrepptes Eisen ist nie ein Passeisen — der Überstand wandert
+   als zusätzliche Übergreifung in den Stoss statt geschnitten zu
+   werden. Die Stufenbildung selbst ist unverändert (Vermessung am
+   längsten Stab, Raster nach aussen, `StepMaxLoss`).
+5. **Keine Ein-Stab-Verlegungen:** Einzelgänger werden mit dem Nachbarn
+   zusammengefasst.
+
+Diese Regeln sind **Bürostandard, nicht normbelegt** — SIA 262 regelt
+Übergreifungslänge und Stossanteile (Ziff. 5.2.6), aber nicht die
+Stossanordnung in Flächen. Umgesetzt in `lap_planning.py`.
 
 **Betondeckung an der Schräge:** Die Deckung wird **senkrecht zur Kante**
 eingehalten. Bei einem Winkel α zwischen Stabachse und Kante ist der
