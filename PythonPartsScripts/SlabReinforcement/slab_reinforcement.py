@@ -989,16 +989,16 @@ class SlabReinforcementScript(BaseScriptObject):
         geometry_z = self._geometry_z
         source = None
 
-        if geometry_z is not None and abs(geometry_z) > 0.01 and \
-                (plane_z is None or abs(plane_z - geometry_z) > 1.0):
-            # Die gebaute Geometrie trägt eine echte Höhe und widerspricht
-            # dem Ebenenbezug (oder er ist nicht lesbar): die Geometrie ist
-            # das, was wirklich im Modell steht — sie gewinnt
-            self.z_offset = geometry_z
-            source = 'Geometrie (min Z der Konturpunkte)'
-        elif plane_z is not None:
+        # Ebenenbezug zuerst — das war der bewährte Weg. Die Geometrie ist
+        # nur die Rückfallebene für Platten, deren Ebenenbezug nichts
+        # liefert (Ebenenhöhen statt absoluter Koten).
+        if plane_z is not None:
             self.z_offset = plane_z
             source = 'PlaneReferences.GetAbsBottomElevation'
+
+            if geometry_z is not None and abs(plane_z - geometry_z) > 1.0:
+                print(f'SlabReinforcement: Hinweis — Geometrie-Z '
+                      f'({geometry_z:.1f}) weicht vom Ebenenbezug ab')
         elif geometry_z is not None:
             self.z_offset = geometry_z
             source = 'Geometrie (min Z der Konturpunkte)'

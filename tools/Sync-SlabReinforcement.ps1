@@ -15,7 +15,7 @@
     heruntergeladen wird nur, was sich tatsaechlich unterscheidet.
 
     GitHub ist die Quelle der Wahrheit: lokale Aenderungen an den gespiegelten
-    Dateien werden ueberschrieben, und lokale .py/.pyp-Dateien, die es im
+    Dateien werden ueberschrieben, und lokale .py/.pyp/.png-Dateien, die es im
     Repository nicht (mehr) gibt, werden geloescht - genau das faengt
     Umbenennungen ab, die sonst als Karteileiche den Import blockieren.
     Mit -KeepExtraFiles unterbleibt das Loeschen.
@@ -34,7 +34,7 @@
     erneut. Ohne diesen Parameter laeuft es genau einmal durch.
 
 .PARAMETER KeepExtraFiles
-    Lokale .py/.pyp-Dateien behalten, die es im Repository nicht gibt.
+    Lokale .py/.pyp/.png-Dateien behalten, die es im Repository nicht gibt.
 
 .PARAMETER Token
     Optionales GitHub-Token. Nur noetig, wenn das Limit fuer nicht
@@ -90,7 +90,7 @@ $SyncDirs = @(
 )
 
 # Nur diese Dateitypen werden gespiegelt und ggf. lokal aufgeraeumt.
-$SyncedExtensions = @('.py', '.pyp')
+$SyncedExtensions = @('.py', '.pyp', '.png')
 
 
 function Write-Log {
