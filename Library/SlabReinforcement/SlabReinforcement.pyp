@@ -746,6 +746,12 @@
         <Value/>
         <ValueType>Integer</ValueType>
       </Parameter>
+      <Parameter>
+        <Name>GeometryState</Name>
+        <Text>Geometry state</Text>
+        <Value/>
+        <ValueType>String</ValueType>
+      </Parameter>
     </Parameters>
   </Page>
 </Element>

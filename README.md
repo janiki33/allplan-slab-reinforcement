@@ -44,6 +44,7 @@ PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modu
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
     opening_reinforcement.py                         Reine Geometrie der Aussparungsbewehrung (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
+    state_persistence.py                             Sichert die eingegebene Geometrie ins PythonPart (ohne Allplan, testbar)
 tests/                                               114 Unit-Tests der vier Geometriemodule (laufen ohne Allplan)
 tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
 tools/Sync-SlabReinforcement.ps1                     Sync GitHub → lokales Allplan-Verzeichnis (Windows)
@@ -157,6 +158,29 @@ Die geplante Aufgabe läuft im angemeldeten Benutzerkontext, weil das verbundene
 Laufwerk `J:` nur dort existiert. Meldet das Protokoll trotzdem
 „Zielverzeichnis nicht erreichbar", stattdessen den UNC-Pfad übergeben, z. B.
 `-AllplanUsr \\server\freigabe\Allplan\Usr\Janosch`.
+
+## Späteres Bearbeiten eines abgesetzten PythonParts
+
+Ein abgesetztes PythonPart wird beim Doppelklick mit einem **frischen**
+ScriptObject geöffnet. Allplan stellt dabei nur die Palettenwerte wieder
+her — die per Interactor eingegebene Geometrie (Absetzpunkt, gezeichnete
+Kontur, Aussparungspolygone) lebt allein im ScriptObject und ist danach weg.
+Ohne sie liefert `execute()` ein leeres Ergebnis und das Element lässt sich
+nicht mehr bearbeiten.
+
+Deshalb legt `state_persistence.py` diese Geometrie beim Abschluss jeder
+Eingaberunde als Zeichenkette im versteckten Parameter `GeometryState` ab
+(Koordinaten auf 0.1 mm gerundet). Beim Öffnen mit
+`InputMode == INPUT_MODE_CREATION` wird sie zurückgelesen und die Eingabe
+gilt als abgeschlossen.
+
+Der Stand trägt eine Fassungsnummer (`STATE_VERSION`). Passt sie nicht oder
+ist der Parameter leer, wird der Stand verworfen statt falsch ausgelegt —
+im Trace-Fenster erscheint dann ein Hinweis.
+
+> **Elemente aus einer Fassung vor dieser Änderung** haben keinen
+> gespeicherten Geometriestand und lassen sich weiterhin nicht bearbeiten.
+> Sie müssen einmal neu abgesetzt werden.
 
 ## Fehlersuche
 

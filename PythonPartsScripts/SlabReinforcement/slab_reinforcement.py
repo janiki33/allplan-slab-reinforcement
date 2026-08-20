@@ -72,12 +72,14 @@ def _load_helper_modules():
     """
 
     names = ('contour_placement', 'lap_splitting', 'opening_clipping',
-             'opening_reinforcement')
+             'opening_reinforcement', 'state_persistence')
 
     try:
         from . import (contour_placement, lap_splitting,        # noqa: F401
-                       opening_clipping, opening_reinforcement)
-        return contour_placement, lap_splitting, opening_clipping, opening_reinforcement
+                       opening_clipping, opening_reinforcement,
+                       state_persistence)
+        return (contour_placement, lap_splitting, opening_clipping,
+                opening_reinforcement, state_persistence)
     except Exception as relative_error:                # noqa: BLE001
         first_error = relative_error
 
@@ -124,8 +126,8 @@ def _load_helper_modules():
     return tuple(modules)
 
 
-_contour_placement, _lap_splitting, _opening_clipping, _opening_reinforcement = \
-    _load_helper_modules()
+_contour_placement, _lap_splitting, _opening_clipping, _opening_reinforcement, \
+    _state_persistence = _load_helper_modules()
 
 compute_contour_bars = _contour_placement.compute_contour_bars
 decompose_into_zones = _contour_placement.decompose_into_zones
@@ -249,6 +251,13 @@ class SlabReinforcementScript(BaseScriptObject):
         # während der Eingabe bereits eine Platte am Nullpunkt erscheinen
         self.input_finished = False
 
+        # Ein abgesetztes PythonPart wird zum Bearbeiten mit einem frischen
+        # ScriptObject geoeffnet: die Palettenwerte stellt Allplan wieder her,
+        # die eingegebene Geometrie nicht. Ohne sie bliebe execute() leer und
+        # das Element waere nicht mehr bearbeitbar.
+        if build_ele.InputMode.value == build_ele.INPUT_MODE_CREATION:
+            self._restore_state()
+
 
     def start_input(self):
         """Ersteingabe je nach gewähltem Eingabemodus starten."""
@@ -336,11 +345,66 @@ class SlabReinforcementScript(BaseScriptObject):
         self.script_object_interactor = None
         self.input_finished = True
 
+        self._save_state()
+
         print(f'SlabReinforcement: Eingabe abgeschlossen — '
               f'Kontur: {"ja" if self.contour else "nein (Rechteck)"}, '
               f'Aussparungen: {len(self.openings)} '
               f'({len(self.detected_openings)} erkannt, '
               f'{len(self.drawn_openings)} gezeichnet)')
+
+
+    # ============ Zustand eines abgesetzten PythonParts ============
+
+    def _save_state(self):
+        """Eingegebene Geometrie in einen versteckten Palettenparameter legen.
+
+        Die Palettenwerte stellt Allplan beim Bearbeiten selbst wieder her,
+        die per Interactor eingegebene Geometrie dagegen nicht — die lebt
+        nur im ScriptObject und waere nach dem Verlassen verloren.
+        """
+
+        try:
+            self.build_ele.GeometryState.value = _state_persistence.encode_state(
+                (self.placement_pnt.X, self.placement_pnt.Y, self.placement_pnt.Z),
+                self.contour,
+                self.detected_openings,
+                self.drawn_openings,
+                self.z_offset,
+                self.thickness_override)
+        except (TypeError, ValueError) as exc:
+            print(f'SlabReinforcement: Geometrie konnte nicht gesichert werden ({exc}) — '
+                  f'das Element waere nach dem Verlassen nicht mehr bearbeitbar')
+
+
+    def _restore_state(self) -> bool:
+        """Gegenstueck zu _save_state; True, wenn etwas geladen wurde."""
+
+        state = _state_persistence.decode_state(self.build_ele.GeometryState.value)
+
+        if state is None:
+            print('SlabReinforcement: kein brauchbarer Geometriestand gespeichert — '
+                  'das Element stammt aus einer aelteren Fassung und muss neu '
+                  'abgesetzt werden')
+            return False
+
+        pnt = state['placement_pnt']
+        self.placement_pnt = AllplanGeo.Point3D(pnt[0], pnt[1], pnt[2])
+
+        self.contour = state['contour']
+        self.detected_openings = state['detected_openings']
+        self.drawn_openings = state['drawn_openings']
+        self.z_offset = state['z_offset']
+        self.thickness_override = state['thickness_override']
+
+        self.input_finished = True
+
+        print(f'SlabReinforcement: Geometriestand geladen — '
+              f'Kontur: {"ja" if self.contour else "nein (Rechteck)"}, '
+              f'Aussparungen: {len(self.detected_openings)} erkannt, '
+              f'{len(self.drawn_openings)} gezeichnet')
+
+        return True
 
 
     def on_control_event(self, event_id: int) -> bool:
@@ -361,6 +425,7 @@ class SlabReinforcementScript(BaseScriptObject):
         if event_id == EVENT_REMOVE_LAST_OPENING:
             if self.drawn_openings:
                 self.drawn_openings.pop()
+                self._save_state()
                 print(f'SlabReinforcement: letzte gezeichnete Aussparung '
                       f'entfernt ({len(self.drawn_openings)} verbleiben)')
             else:
@@ -372,6 +437,7 @@ class SlabReinforcementScript(BaseScriptObject):
             print(f'SlabReinforcement: {len(self.drawn_openings)} gezeichnete '
                   f'Aussparung(en) entfernt')
             self.drawn_openings = []
+            self._save_state()
 
             return True
 
