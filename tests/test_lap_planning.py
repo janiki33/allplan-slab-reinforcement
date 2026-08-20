@@ -260,16 +260,54 @@ class FluchtShareTest(unittest.TestCase):
                 active_fluchten(self.CONTOUR, [self.OP1, self.OP2], axis,
                                 bars, 3000.0), [])
 
-    def test_full_x_bars_get_plain_thirds(self):
+    def test_full_x_bars_anchor_on_the_zone_edge(self):
+        """Anker-Regel: erste Stossachse an der Aussenkante der
+        Aussparungszone (x = 5045), das freie Feld rechts davon
+        gleichmässig geteilt — insgesamt 3 Stösse je Vollbahn."""
+
         bars = compute_contour_bars(self.CONTOUR, [self.OP1, self.OP2], 0,
                                     300.0, 30.0, 300.0, dist_margin=36)
         groups = plan_layer(bars, self.CONTOUR, [self.OP1, self.OP2], 0, **PARAMS)
 
         full = pieces_at(groups, 36.0)
-        self.assertEqual(len(full), 3)        # 20.45 m -> gedrittelt
+        self.assertEqual(len(full), 4)
+        self.assertAlmostEqual(full[0][1], 5045 + 300, places=6)
 
         for piece in full:
             self.assertLessEqual(piece[1] - piece[0], 8000 + 1e-6)
+
+    def test_free_field_pieces_are_shared_across_all_rows(self):
+        """Rechts der Zone EINE durchgehende Verlegung: die hinteren
+        Stücke der Aussparungszeilen sind identisch mit denen der vollen
+        Bahnen und werden über die ganze Plattenhöhe zusammengelegt."""
+
+        bars = compute_contour_bars(self.CONTOUR, [self.OP1, self.OP2], 0,
+                                    300.0, 30.0, 300.0, dist_margin=36)
+        groups = plan_layer(bars, self.CONTOUR, [self.OP1, self.OP2], 0, **PARAMS)
+
+        full = pieces_at(groups, 36.0)
+        op1_row = pieces_at(groups, 9636.0)
+
+        # letzte zwei Stücke identisch (globale Achsen im freien Feld)
+        self.assertEqual(full[-1], op1_row[-1])
+        self.assertEqual(full[-2], op1_row[-2])
+
+        # und als eine Verlegung über alle Bahnen zusammengelegt
+        big = [g for g in groups if g.piece == full[-1]]
+        self.assertEqual(len(big), 1)
+        self.assertEqual(len(big[0].positions), len(bars))
+
+    def test_y_columns_keep_the_plain_mid(self):
+        """In Y gibt es keinen Anker: die freien Stücke neben der Zone
+        sind nicht überlang — volle Spalten stossen einfach mittig."""
+
+        bars = compute_contour_bars(self.CONTOUR, [self.OP1, self.OP2], 1,
+                                    300.0, 30.0, 300.0, dist_margin=36)
+        groups = plan_layer(bars, self.CONTOUR, [self.OP1, self.OP2], 1, **PARAMS)
+
+        full = pieces_at(groups, 19836.0)
+        self.assertEqual(len(full), 2)
+        self.assertAlmostEqual(full[0][1], (30 + 14995) / 2 + 300, places=6)
 
     def test_row_next_to_opening_laps_mid(self):
         bars = compute_contour_bars(self.CONTOUR, [self.OP1, self.OP2], 0,

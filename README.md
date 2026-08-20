@@ -574,8 +574,16 @@ Anzahl Verlegungen — Stösse selbst kosten nichts.** Kein Stossraster.
    als zusätzliche Übergreifung in den Stoss statt geschnitten zu
    werden. Die Stufenbildung selbst ist unverändert (Vermessung am
    längsten Stab, Raster nach aussen, `StepMaxLoss`).
-5. **Keine Ein-Stab-Verlegungen:** Einzelgänger werden mit dem Nachbarn
-   zusammengefasst.
+5. **Anker-Regel:** Fällt eine Aussparungszone unter die Flucht-Grenze,
+   wird ihre Aussenkante trotzdem zur Stossachse, wenn die dort
+   beginnenden freien Eisen selbst überlang sind — gestörte und volle
+   Bahnen teilen sich dann die Überlängen-Achsen des freien Felds, das
+   als **eine durchgehende Verlegung** über die ganze Platte läuft
+   (Regel aus dem Projektbeispiel: „rechts eine über die ganze Länge,
+   links davon die Höhenunterschiede").
+6. **Keine Ein-Stab-Verlegungen:** Einzelgänger werden mit dem Nachbarn
+   zusammengefasst; Verlegungen mit identischem Stück und nahtlos
+   anschliessenden Positionen werden zusammengelegt.
 
 Diese Regeln sind **Bürostandard, nicht normbelegt** — SIA 262 regelt
 Übergreifungslänge und Stossanteile (Ziff. 5.2.6), aber nicht die

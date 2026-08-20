@@ -26,8 +26,15 @@ Regeln:
        eine Stufe, solange keiner mehr als die zulässige Abweichung von
        seiner Länge verliert; vermessen wird am längsten Stab der Stufe,
        das Längenraster rundet nach aussen.
-    5. Keine Verlegung mit nur einem Stab: Einzelgänger werden mit dem
-       Nachbarn zusammengefasst.
+    5. Anker-Regel: Fällt eine Aussparungszone unter die Flucht-Grenze,
+       wird die Aussenkante der Zone trotzdem zur Stossachse, wenn die
+       dort beginnenden (bzw. endenden) freien Stücke selbst überlang
+       sind — dann teilen sich gestörte und volle Bahnen die
+       Überlängen-Achsen des freien Felds, und rechts (bzw. links) der
+       Zone entsteht EINE durchgehende Verlegung über die ganze Platte.
+    6. Keine Verlegung mit nur einem Stab: Einzelgänger werden mit dem
+       Nachbarn zusammengefasst; Verlegungen mit identischem Stück und
+       nahtlos anschliessenden Positionen werden zusammengelegt.
 
 Wie die übrigen Geometriemodule bewusst OHNE Allplan-Abhängigkeit.
 """
@@ -135,6 +142,90 @@ def active_fluchten(contour: Loop,
     return sorted(set(fluchten))
 
 
+def anchor_axes(bars,
+                openings: list[Loop],
+                run_axis: int,
+                fluchten: list[float],
+                lmax: float,
+                lap: float,
+                near: float = 500.0) -> list[float]:
+    """Aussenkanten der Aussparungszone als Stossanker (Regel 5).
+
+    Zone = Gesamtausdehnung aller Aussparungen, deren Kanten NICHT als
+    Fluchten aktiv sind. Eine Zonen-Aussenkante wird zur Achse, wenn dort
+    freie Stücke beginnen/enden, die selbst überlang sind — nur dann
+    lassen sich deren Pflichtstösse mit den vollen Bahnen teilen.
+    """
+
+    sub = []
+
+    for opening in openings:
+        bb = loop_bbox(opening)
+        lo, hi = bb[run_axis], bb[run_axis + 2]
+
+        if lo not in fluchten and hi not in fluchten:
+            sub.append((lo, hi))
+
+    if not sub:
+        return []
+
+    zone_lo = min(s[0] for s in sub)
+    zone_hi = max(s[1] for s in sub)
+
+    axes: list[float] = []
+
+    for edge, at_start in ((zone_hi, True), (zone_lo, False)):
+        for bar in bars:
+            hit = False
+
+            for seg in bar.segments:
+                boundary = seg[0] if at_start else seg[1]
+
+                if abs(boundary - edge) <= near and \
+                        (seg[1] - seg[0]) + lap > lmax:
+                    hit = True
+                    break
+
+            if hit:
+                axes.append(edge)
+                break
+
+    return axes
+
+
+def _needed_cuts(length: float,
+                 lmax: float,
+                 lap: float,
+                 left_cut: bool,
+                 right_cut: bool) -> int:
+    """Kleinste Stossanzahl, mit der alle Teilstücke die zulässige
+    Stablänge einhalten.
+
+    Ein Teilstück wächst je Stossseite um die halbe Übergreifung —
+    Endstücke an einer Betonkante nur einseitig. Die frühere Pauschale
+    (+ ganze Übergreifung je Stück) hat 15-m-Eisen fälschlich geviertelt
+    statt halbiert.
+    """
+
+    for count in range(0, 64):
+        worst = 0.0
+
+        for i in range(count + 1):
+            piece = length / (count + 1)
+
+            if i > 0 or left_cut:
+                piece += lap / 2.0
+            if i < count or right_cut:
+                piece += lap / 2.0
+
+            worst = max(worst, piece)
+
+        if worst <= lmax + 1e-6:
+            return count
+
+    return 63
+
+
 def _equal_cuts(seg: Interval, count: int) -> list[float]:
     """count Stossachsen, die das Segment in count+1 gleiche Teile teilen."""
 
@@ -162,10 +253,11 @@ def base_cuts(seg: Interval,
 
     bounds = [seg[0]] + sorted(cuts) + [seg[1]]
 
-    for lo, hi in zip(bounds, bounds[1:]):
-        piece_len = (hi - lo) + lap          # Stück inkl. Übergreifungsanteil
-        if piece_len > lmax:
-            extra = math.ceil(piece_len / lmax) - 1
+    for j, (lo, hi) in enumerate(zip(bounds, bounds[1:])):
+        extra = _needed_cuts(hi - lo, lmax, lap,
+                             left_cut=(j > 0),
+                             right_cut=(j < len(bounds) - 2))
+        if extra:
             cuts += _equal_cuts((lo, hi), extra)
 
     if not cuts and length >= pass_threshold:
@@ -296,7 +388,37 @@ def plan_layer(bars,
 
     fluchten = active_fluchten(contour, openings, run_axis, bars,
                                pass_threshold, flucht_min_share)
+    anchors = anchor_axes(bars, openings, run_axis, fluchten, lmax, lap)
     breaks = scan_breaks(contour, openings, run_axis)
+
+    # Globale Stossachsen: Fluchten und Anker, dazu die gleichmässige
+    # Teilung des Gesamtumrisses — dieselben Achsen gelten für alle
+    # Bahnen, damit sich Stücke über die Regionen hinweg decken
+    all_lo = min(s[0] for b in bars for s in b.segments)
+    all_hi = max(s[1] for b in bars for s in b.segments)
+    axes = base_cuts((all_lo, all_hi), sorted(set(fluchten + anchors)),
+                     lmax, lap, pass_threshold, min_bar)
+
+    margin = max(lap, min_bar)
+
+    def cuts_for(seg: Interval) -> list[float]:
+        """Globale Achsen im Segment plus lokale Nachbesserung
+        (Überlänge gleichmässig, Passeisen mittig)."""
+
+        cuts = [a for a in axes if seg[0] + margin < a < seg[1] - margin]
+
+        bounds = [seg[0]] + sorted(cuts) + [seg[1]]
+        for j, (lo, hi) in enumerate(zip(bounds, bounds[1:])):
+            extra = _needed_cuts(hi - lo, lmax, lap,
+                                 left_cut=(j > 0),
+                                 right_cut=(j < len(bounds) - 2))
+            if extra:
+                cuts += _equal_cuts((lo, hi), extra)
+
+        if not cuts and seg[1] - seg[0] >= pass_threshold:
+            cuts = [(seg[0] + seg[1]) / 2.0]
+
+        return sorted(cuts)
 
     groups: list[PlacementGroup] = []
 
@@ -308,7 +430,7 @@ def plan_layer(bars,
         end_stepped = max(ends) - min(ends) > tol
 
         envelope = (min(starts), max(ends))
-        cuts = base_cuts(envelope, fluchten, lmax, lap, pass_threshold, min_bar)
+        cuts = cuts_for(envelope)
 
         line_start = line_end = None
 
@@ -339,7 +461,48 @@ def plan_layer(bars,
             groups += _step_groups(region, line_start, lap, step_deviation,
                                    raster, side='start')
 
-    return _merge_singletons(groups)
+    return _merge_singletons(_merge_equal_groups(groups))
+
+
+def _merge_equal_groups(groups: list[PlacementGroup],
+                        tol: float = 1.0) -> list[PlacementGroup]:
+    """Regel 6: Verlegungen mit identischem Stück, deren Positionsläufe
+    nahtlos aneinander anschliessen (Lücke = Stababstand), werden zu einer
+    Verlegung zusammengelegt — z. B. das freie Feld rechts einer
+    Aussparungszone über die ganze Plattenhöhe."""
+
+    by_piece: dict = {}
+
+    for g in groups:
+        key = (round(g.piece[0], 1), round(g.piece[1], 1))
+        by_piece.setdefault(key, []).append(g)
+
+    result: list[PlacementGroup] = []
+
+    for runs in by_piece.values():
+        runs.sort(key=lambda g: g.positions[0])
+        merged = [runs[0]]
+
+        for g in runs[1:]:
+            prev = merged[-1]
+            spacing = None
+
+            if len(prev.positions) > 1:
+                spacing = prev.positions[1] - prev.positions[0]
+            elif len(g.positions) > 1:
+                spacing = g.positions[1] - g.positions[0]
+
+            gap = g.positions[0] - prev.positions[-1]
+
+            if spacing is not None and abs(gap - spacing) <= tol:
+                merged[-1] = PlacementGroup(prev.positions + g.positions,
+                                            prev.piece)
+            else:
+                merged.append(g)
+
+        result += merged
+
+    return result
 
 
 def _step_line(cuts: list[float],

@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.7.1</Version>
+    <Version>0.7.2</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
