@@ -708,12 +708,6 @@
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
-            <Name>LayerOpeningStirrup</Name>
-            <Text>Layer Randbügel Aussparung</Text>
-            <Value>0</Value>
-            <ValueType>Layer</ValueType>
-          </Parameter>
-          <Parameter>
             <Name>LayerStirrupX</Name>
             <Text>Layer Randbügel links/rechts</Text>
             <Value>64265</Value>

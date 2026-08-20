@@ -938,7 +938,19 @@ class SlabReinforcement():
         # liegt direkt auf bzw. unter der Betondeckung, die innere darüber
         # bzw. darunter. Eine einzige Betondeckung gilt für alle Lagen und
         # für die Stabenden (Seitendeckung).
-        if build_ele.OuterLayerDirection.value == 'X-Richtung':
+        # Auf den Anfangsbuchstaben pruefen statt auf den vollen Text: sonst
+        # landet jede geaenderte Beschriftung stillschweigend im Else-Zweig,
+        # und der Umschalter wirkt scheinbar gar nicht
+        outer_direction = 'X' if str(build_ele.OuterLayerDirection.value).strip().upper().startswith('X') \
+            else 'Y'
+
+        # Im Trace-Fenster nachvollziehbar, welche Richtung tatsaechlich
+        # aussen liegt — der Hoehenunterschied betraegt nur einen
+        # Stabdurchmesser und ist in der Draufsicht nicht zu sehen
+        print(f'SlabReinforcement: äußere Lagen in {outer_direction}-Richtung '
+              f'(Palettenwert "{build_ele.OuterLayerDirection.value}")')
+
+        if outer_direction == 'X':
             bottom_outer, bottom_inner = bottom_x, bottom_y
             top_outer, top_inner = top_x, top_y
         else:
@@ -1379,6 +1391,9 @@ class SlabReinforcement():
                 edge_layer.bending_roller = AllplanReinf.BendingRollerService.GetBendingRollerFactor(
                     edge_layer.diameter, edge_layer.steel_grade, -1, False)
 
+                # Layer der Hauptlage gleicher Richtung und Höhenlage
+                edge_layer.allplan_layer = main_layer.allplan_layer
+
                 edge_layers.append(edge_layer)
 
         placements: list[AllplanReinf.BarPlacement] = []
@@ -1418,15 +1433,17 @@ class SlabReinforcement():
                         from_pnt = self._pnt(run.dist_from, piece_from, edge_layer.z_axis)
                         to_pnt = self._pnt(run.dist_to, piece_from, edge_layer.z_axis)
 
-                    placements.append(
-                        LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
-                            self._next_position(),
-                            shape,
-                            from_pnt,
-                            to_pnt,
-                            0,
-                            0,
-                            bar_count))
+                    placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
+                        self._next_position(),
+                        shape,
+                        from_pnt,
+                        to_pnt,
+                        0,
+                        0,
+                        bar_count)
+
+                    self._set_placement_layer(placement, edge_layer.allplan_layer)
+                    placements.append(placement)
 
         return placements
 
@@ -1544,8 +1561,9 @@ class SlabReinforcement():
 
             no_cover = ConcreteCoverProperties(0.0, 0.0, 0.0, 0.0)
 
-            stirrup_layer_id = self.build_ele.LayerStirrupX.value if direction == 'X' \
-                else self.build_ele.LayerStirrupY.value
+            # Layer wie die Lage, die in Bügelrichtung verläuft — dieselbe
+            # Lage, von der auch Ø, Abstand und Stahlgüte stammen
+            stirrup_layer_id = bottom_layer.allplan_layer
 
             if direction == 'X':
                 run_len, dist_len = self.length, self.width
@@ -2106,7 +2124,9 @@ class SlabReinforcement():
             placement = self._create_contour_stirrup(
                 bottom, top, inward, from_2d, to_2d,
                 spacing=spacing,
-                allplan_layer=self.build_ele.LayerOpeningStirrup.value)
+                # Layer der Lage, die in Bügelrichtung verläuft — dieselbe
+                # Lage, von der auch Ø, Abstand und Stahlgüte stammen
+                allplan_layer=bottom.allplan_layer)
 
             if placement is not None:
                 placements.append(placement)
