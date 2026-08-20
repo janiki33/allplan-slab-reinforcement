@@ -159,7 +159,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.7.2'
+SCRIPT_VERSION = '0.7.3'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -1316,6 +1316,14 @@ class SlabReinforcement():
 
         lap = self.overlap_factor * layer.diameter
 
+        # Hilfsparallele auch im Bandpfad: die Öffnung wird für die
+        # Verlegebänder um Deckung + halben Stabdurchmesser aufgeweitet,
+        # damit kein Stab im Deckungsstreifen der Aussparung liegt
+        strip = self.concrete_cover + layer.diameter / 2.0
+
+        if opening_dist is not None:
+            opening_dist = (opening_dist[0] - strip, opening_dist[1] + strip)
+
         bands = compute_placement_bands(dist_len, run_len, opening_dist, opening_run,
                                         min_segment_length=min_segment_length,
                                         bonus_start=lap if side_start == SIDE_CONNECT else 0.0,
@@ -2114,10 +2122,14 @@ class SlabReinforcement():
                     allplan_layer=build_ele.LayerOpeningEdge.value)
 
             if diagonal_active:
+                diagonal_offset = max(
+                    build_ele.DiagonalDiameter.value + build_ele.EdgeBarDiameter.value,
+                    self.cover_side + build_ele.DiagonalDiameter.value / 2.0)
+
                 diagonals = corner_diagonals(
                     opening,
                     build_ele.DiagonalCount.value,
-                    build_ele.DiagonalDiameter.value + build_ele.EdgeBarDiameter.value,
+                    diagonal_offset,
                     build_ele.DiagonalLength.value,
                     build_ele.DiagonalSpacing.value)
 
@@ -2221,10 +2233,15 @@ class SlabReinforcement():
 
         build_ele = self.build_ele
 
+        # Erste Stabachse ausserhalb der Hilfsparallele: mindestens
+        # Deckung + halber Stabdurchmesser von der Aussparungskante
+        diameter = build_ele.EdgeBarDiameter.value
+        first_offset = max(diameter, self.cover_side + diameter / 2.0)
+
         bars = opening_edge_bars(
             opening,
             build_ele.EdgeBarCount.value,
-            build_ele.EdgeBarDiameter.value,
+            first_offset,
             build_ele.EdgeBarSpacing.value,
             build_ele.LapLength.value)
 

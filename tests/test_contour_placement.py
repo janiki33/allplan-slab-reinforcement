@@ -564,12 +564,13 @@ class ParallelEdgeCoverTest(unittest.TestCase):
 
     def test_bar_is_clipped_not_dropped(self):
         # y = 30 + 10*195 = 1980 liegt 20 mm unter der Kante y=2000 und wird
-        # bei x=3000 abgeschnitten statt komplett zu entfallen.
+        # abgeschnitten statt komplett zu entfallen; der Sperrstreifen ist
+        # um die Deckung verlängert, damit auch zur Ecke Deckung bleibt.
         bars = {bar.position: bar.segments
                 for bar in compute_contour_bars(L_SHAPE, [], 0, 195, 30, 200,
                                                 dist_margin=30)}
 
-        self.assertEqual(bars[1980], ((30.0, 3000.0),))
+        self.assertEqual(bars[1980], ((30.0, 2970.0),))
         self.assertEqual(bars[1785], ((30.0, 4970.0),))
 
     def test_full_width_bars_are_kept(self):
@@ -579,6 +580,26 @@ class ParallelEdgeCoverTest(unittest.TestCase):
         positions = [bar.position for bar in bars]
 
         self.assertIn(1030.0, positions)
+
+    def test_opening_cover_strip_blocks_parallel_bars(self):
+        """Hilfsparallele um die Aussparung: ein Stab, der innerhalb der
+        Deckung an einer Aussparungskante entlangläuft, wird über deren
+        (um die Deckung verlängerte) Ausdehnung abgeschnitten."""
+
+        opening = [(2000, 1000), (3000, 1000), (3000, 2000), (2000, 2000)]
+        # Raster trifft y = 1020 — nur 20 mm unter der Kante y = 1000
+        bars = {bar.position: bar.segments
+                for bar in compute_contour_bars(RECT, [opening], 0, 165, 30,
+                                                200, dist_margin=30)}
+
+        clipped = bars[1020.0]
+        self.assertEqual(len(clipped), 2)
+        self.assertAlmostEqual(clipped[0][1], 2000 - 30, places=6)
+        self.assertAlmostEqual(clipped[1][0], 3000 + 30, places=6)
+
+        # Ein Stab ausserhalb des Streifens läuft ungestört durch
+        far = [seg for pos, segs in bars.items() if pos < 900 for seg in segs]
+        self.assertTrue(all(abs(seg[1] - 4970) < 1 for seg in far))
 
     def test_rectangle_is_unaffected(self):
         with_filter = compute_contour_bars(RECT, [], 0, 250, 30, 200,

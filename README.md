@@ -596,15 +596,19 @@ Deckung. Für spitze Winkel begrenzt `MaxEdgeSetback` (Default 150 mm) den
 Rückversatz, damit Stäbe in spitzen Ecken nicht unbrauchbar kurz werden.
 Öffnungsränder erhalten dieselbe Behandlung.
 
-**Kanten parallel zur Stabrichtung:** Auch dort gilt die Deckung. Für die
-äusseren Ränder erledigt das der Randabstand der Stabachsen
-(`Deckung + ø/2`). Bei einspringenden Kanten (L-Form, Vorsprünge) liegt
-eine solche Kante mitten im Scanraster — ein Stab, der in deren
-Deckungsstreifen fiele, wird auf der Ausdehnung dieser Kante
-**abgeschnitten** (nicht ganz verworfen), damit der übrige Plattenbereich
-bewehrt bleibt. Öffnungen sind davon ausgenommen: ein durchgehender Stab
-soll nicht wegen einer kleinen Aussparung entfallen, dort greift die
-Öffnungsrandbewehrung.
+**Hilfsparallelen (strikte Deckungszonen):** Um jede Aussparung liegt
+eine nach aussen um die Deckung verbreiterte Zone, innerhalb der
+Plattenkontur eine nach innen versetzte — **in der Zone dürfen keine
+Eisen liegen.** Für die äusseren Ränder erledigt das der Randabstand der
+Stabachsen (`Deckung + ø/2`); stabparallele Kanten (einspringende Ecken
+UND Aussparungskanten) sperren ihren Deckungsstreifen zusätzlich: ein
+Stab, der hineinfiele, wird auf der (um die Deckung verlängerten)
+Ausdehnung der Kante **abgeschnitten**, nicht ganz verworfen. Auch die
+Zulagen halten den Abstand: die erste Randzulage liegt mindestens
+`Deckung + ø/2` neben der Aussparungskante. Einzige Ausnahme: Eisen
+einer Abtreppung, die am längsten Stab der Stufe vermessen sind, dürfen
+über die Kante der kürzeren Nachbarn hinauslaufen (bewusst so
+abgenommen).
 
 ### 6. Öffnungen — Zulagen
 

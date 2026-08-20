@@ -314,9 +314,12 @@ class FluchtShareTest(unittest.TestCase):
                                     300.0, 30.0, 300.0, dist_margin=36)
         groups = plan_layer(bars, self.CONTOUR, [self.OP1, self.OP2], 0, **PARAMS)
 
-        # Zeile durch Aussparung 2: linkes Stück 30..3220 mittig gestossen
+        # Zeile durch Aussparung 2: linkes Stück mittig gestossen. Die
+        # Region endet an der Schnittmenge der Nachbarbahnen (3214: der
+        # Sperrstreifen der Aussparung clippt die Bahn direkt daneben) —
+        # strikt in der Deckung, kein Stab ragt in die Hilfsparallele
         row = pieces_at(groups, 6336.0)
-        self.assertAlmostEqual(row[0][1], (30 + 3220) / 2 + 300, places=6)
+        self.assertAlmostEqual(row[0][1], (30 + 3214) / 2 + 300, places=6)
 
     def test_large_opening_still_uses_fluchten(self):
         contour = [(0, 0), (14000, 0), (14000, 7000), (0, 7000)]

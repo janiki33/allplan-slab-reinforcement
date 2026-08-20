@@ -422,14 +422,22 @@ def plan_layer(bars,
 
     groups: list[PlacementGroup] = []
 
+    # Eine echte Stufe braucht einen echten Sprung: kleine Differenzen aus
+    # Deckungs-Clipping (wenige mm) sind keine Abtreppung
+    step_tol = max(raster, 10.0 * tol)
+
     for region in _slot_regions(bars, breaks):
         starts = [s[0] for s in region.segs]
         ends = [s[1] for s in region.segs]
 
-        start_stepped = max(starts) - min(starts) > tol
-        end_stepped = max(ends) - min(ends) > tol
+        start_stepped = max(starts) - min(starts) > step_tol
+        end_stepped = max(ends) - min(ends) > step_tol
 
-        envelope = (min(starts), max(ends))
+        # Gleichmässige Seiten strikt in der Deckung halten: dort gilt die
+        # Schnittmenge (kein Stab ragt in den Sperrstreifen eines
+        # Nachbarn); nur echte Stufen arbeiten mit der Hülle
+        envelope = (min(starts) if start_stepped else max(starts),
+                    max(ends) if end_stepped else min(ends))
         cuts = cuts_for(envelope)
 
         line_start = line_end = None

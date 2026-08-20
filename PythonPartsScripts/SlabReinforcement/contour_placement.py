@@ -281,12 +281,14 @@ def _parallel_cover_holes(position: float,
     """Sperrbereiche auf der run-Achse für eine Scan-Position.
 
     Liegt die Position innerhalb der Betondeckung einer stabparallelen
-    Kante, darf der Stab auf deren Ausdehnung nicht verlaufen — er wird
-    dort abgeschnitten statt komplett zu entfallen, damit der Rest der
-    Platte weiter bewehrt bleibt.
+    Kante (Hilfsparallele), darf der Stab auf deren Ausdehnung nicht
+    verlaufen — er wird dort abgeschnitten statt komplett zu entfallen,
+    damit der Rest der Platte weiter bewehrt bleibt. Der Sperrbereich
+    ist an beiden Enden um die Deckung verlängert, damit auch zur
+    anschliessenden Querkante (Ecke) die Deckung eingehalten ist.
     """
 
-    return [(edge_from, edge_to)
+    return [(edge_from - margin, edge_to + margin)
             for coord, edge_from, edge_to in edges
             if abs(position - coord) < margin - tol]
 
@@ -334,13 +336,16 @@ def compute_contour_bars(contour: Loop,
 
     bars: list[ContourBar] = []
 
-    # Plattenkanten parallel zur Stabrichtung sperren ihren Deckungsstreifen:
-    # dort darf kein Stab liegen. Für die bbox-Ränder erledigt das bereits
-    # margin, für einspringende Kanten (L-Form, Vorsprünge) nicht.
-    # Öffnungen sind hier bewusst ausgenommen — ein durchgehender Stab soll
-    # nicht wegen einer kleinen Aussparung ganz entfallen; dort greift die
-    # Öffnungsrandbewehrung.
+    # Hilfsparallelen: jede stabparallele Kante sperrt ihren
+    # Deckungsstreifen — dort dürfen KEINE Eisen liegen. Für die
+    # bbox-Ränder erledigt das bereits margin; einspringende Konturkanten
+    # (L-Form, Vorsprünge) und **alle Aussparungskanten** sperren
+    # zusätzlich: um die Aussparung liegt eine nach aussen um die Deckung
+    # verbreiterte Zone, in der die Stäbe abgeschnitten werden.
     blocking_edges = parallel_edges(contour, run_axis)
+
+    for opening in openings:
+        blocking_edges += parallel_edges(opening, run_axis)
 
     for position in scan_positions(dist_min, dist_max, spacing,
                                    edge_zone_length, edge_zone_spacing):
