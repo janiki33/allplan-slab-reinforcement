@@ -243,6 +243,53 @@ class SteppedPlanTest(unittest.TestCase):
                 self.assertGreaterEqual(a[1] - b[0], 600 - 1e-6)
 
 
+class FluchtShareTest(unittest.TestCase):
+    """Lohnt-sich-Regel: kleine Aussparungen in grossen Platten erzeugen
+    keine Fluchten — belegt am realen Projektbeispiel 20.5 x 15 m."""
+
+    CONTOUR = [(0, 0), (20510, 0), (20510, 15025), (0, 15025)]
+    OP1 = [(810, 9190), (5045, 9190), (5045, 10380), (810, 10380)]
+    OP2 = [(3250, 6030), (4850, 6030), (4850, 7780), (3250, 7780)]
+
+    def test_small_openings_produce_no_fluchten(self):
+        for axis in (0, 1):
+            bars = compute_contour_bars(self.CONTOUR, [self.OP1, self.OP2],
+                                        axis, 300.0, 30.0, 300.0,
+                                        dist_margin=36)
+            self.assertEqual(
+                active_fluchten(self.CONTOUR, [self.OP1, self.OP2], axis,
+                                bars, 3000.0), [])
+
+    def test_full_x_bars_get_plain_thirds(self):
+        bars = compute_contour_bars(self.CONTOUR, [self.OP1, self.OP2], 0,
+                                    300.0, 30.0, 300.0, dist_margin=36)
+        groups = plan_layer(bars, self.CONTOUR, [self.OP1, self.OP2], 0, **PARAMS)
+
+        full = pieces_at(groups, 36.0)
+        self.assertEqual(len(full), 3)        # 20.45 m -> gedrittelt
+
+        for piece in full:
+            self.assertLessEqual(piece[1] - piece[0], 8000 + 1e-6)
+
+    def test_row_next_to_opening_laps_mid(self):
+        bars = compute_contour_bars(self.CONTOUR, [self.OP1, self.OP2], 0,
+                                    300.0, 30.0, 300.0, dist_margin=36)
+        groups = plan_layer(bars, self.CONTOUR, [self.OP1, self.OP2], 0, **PARAMS)
+
+        # Zeile durch Aussparung 2: linkes Stück 30..3220 mittig gestossen
+        row = pieces_at(groups, 6336.0)
+        self.assertAlmostEqual(row[0][1], (30 + 3220) / 2 + 300, places=6)
+
+    def test_large_opening_still_uses_fluchten(self):
+        contour = [(0, 0), (14000, 0), (14000, 7000), (0, 7000)]
+        opening = [(6000, 2500), (8500, 2500), (8500, 4500), (6000, 4500)]
+        bars = bars_for(contour, [opening])
+
+        # 2 m Kante an 7 m Platte = 29 % >= 25 % -> Fluchten aktiv
+        self.assertEqual(active_fluchten(contour, [opening], 0, bars, 3000.0),
+                         [6000, 8500])
+
+
 class NoSingletonTest(unittest.TestCase):
 
     def test_no_single_bar_groups_in_stepped_regions(self):

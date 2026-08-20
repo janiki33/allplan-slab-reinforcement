@@ -159,7 +159,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.7.0'
+SCRIPT_VERSION = '0.7.1'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -895,6 +895,11 @@ class SlabReinforcement():
         # Mindestlänge eines Abtreppungsstücks: unterschreitet das kürzeste
         # Stufenstück diesen Wert, rutscht die ganze Stosslinie nach innen
         self.step_min_piece = build_ele.StepMinPieceLength.value
+
+        # Lohnt-sich-Grenze für Fluchten: Anteil der Plattenbreite, den
+        # eine Aussparungskante mindestens belegen muss, damit ihre Flucht
+        # als durchgehende Stossachse verwendet wird
+        self.flucht_min_share = build_ele.FluchtMinShare.value / 100.0
 
         self.max_edge_setback = build_ele.MaxEdgeSetback.value
 
@@ -2489,7 +2494,8 @@ class SlabReinforcement():
             step_deviation=self.step_max_loss,
             raster=self.step_length_raster,
             min_piece=self.step_min_piece,
-            min_bar=min_bar_length)
+            min_bar=min_bar_length,
+            flucht_min_share=self.flucht_min_share)
 
         placements: list[AllplanReinf.BarPlacement] = []
 

@@ -12,9 +12,13 @@ Regeln:
        stattdessen schieben.
     3. Fluchten (Aussparungskanten und einspringende Ecken quer zur
        Stabrichtung) sind bevorzugte Stossachsen und laufen durch die
-       ganze Platte. Eine Eck-Flucht entfällt, wenn die kurze Seite der
-       Ecke ohnehin mittig gestossen wird (Länge >= Passeisen-Grenze) —
-       dann bringt die Flucht keine gemeinsame Verlegung mehr.
+       ganze Platte — aber nur, wenn sie sich lohnen: die Kante muss
+       einen Mindestanteil der Plattenbreite betreffen (min_share,
+       Default 25 %). Kleine Aussparungen in grossen Platten erzeugen
+       sonst Zusatzstösse über das ganze Feld, ohne Verlegungen zu
+       sparen (belegt am realen Projektbeispiel 20.5 x 15 m). Eine
+       Eck-Flucht entfällt ausserdem, wenn die kurze Seite der Ecke
+       ohnehin mittig gestossen wird (Länge >= Passeisen-Grenze).
     4. Abtreppung: je Bereich EINE gerade Stosslinie, geerbt vom
        Pflichtstoss der vollen Bahnen; sie rutscht parallel nach innen,
        bis jedes Abtreppungsstück die Mindestlänge erreicht. Die
@@ -56,20 +60,38 @@ def active_fluchten(contour: Loop,
                     run_axis: int,
                     bars,
                     pass_threshold: float,
+                    min_share: float = 0.25,
                     tol: float = 1.0) -> list[float]:
     """Stossachsen-Kandidaten quer zur Stabrichtung.
 
-    Aussparungskanten sind immer aktiv. Eine einspringende Konturkante
-    (Ecke) ist nur aktiv, wenn die an ihr endenden kurzen Bahnstücke
-    unter der Passeisen-Grenze liegen — sonst bekommen diese ohnehin
-    einen mittigen Stoss und die Flucht spart keine Verlegung (Regel 3).
+    Eine Flucht ist nur aktiv, wenn sich das Ausrichten lohnt (Regel 3):
+    die Kante muss mindestens min_share der Scan-Ausdehnung der Platte
+    betreffen — so viele Bahnen enden dort, dass eine gemeinsame
+    Stossachse Verlegungen spart. Kleine Aussparungen in grossen Platten
+    fallen durch und ihre Umgebung stösst segmentweise mittig.
+
+    Eine einspringende Konturkante (Ecke) ist zusätzlich nur aktiv, wenn
+    die an ihr endenden kurzen Bahnstücke unter der Passeisen-Grenze
+    liegen — sonst bekommen diese ohnehin einen mittigen Stoss und die
+    Flucht spart keine Verlegung.
     """
+
+    if not bars:
+        return []
+
+    scan_extent = max(b.position for b in bars) - min(b.position for b in bars)
+
+    if scan_extent <= 0:
+        return []
 
     fluchten: list[float] = []
 
     for opening in openings:
         bb = loop_bbox(opening)
-        fluchten += [bb[run_axis], bb[run_axis + 2]]
+        span = bb[(1 - run_axis) + 2] - bb[1 - run_axis]
+
+        if span / scan_extent >= min_share:
+            fluchten += [bb[run_axis], bb[run_axis + 2]]
 
     bb = loop_bbox(contour)
     lo, hi = bb[run_axis], bb[run_axis + 2]
@@ -86,6 +108,9 @@ def active_fluchten(contour: Loop,
             continue
 
         span = sorted((p1[1 - run_axis], p2[1 - run_axis]))
+
+        if (span[1] - span[0]) / scan_extent < min_share:
+            continue                     # zu kleine Kante — lohnt nicht
 
         # Kurze Seite: Segmente, die im Kantenbereich an dieser Kante enden
         short_lengths = []
@@ -262,13 +287,15 @@ def plan_layer(bars,
                raster: float,
                min_piece: float,
                min_bar: float,
+               flucht_min_share: float = 0.25,
                tol: float = 1.0) -> list[PlacementGroup]:
     """Vollständige Stoss- und Verlegeplanung einer Lage."""
 
     if not bars or lap <= 0:
         return []
 
-    fluchten = active_fluchten(contour, openings, run_axis, bars, pass_threshold)
+    fluchten = active_fluchten(contour, openings, run_axis, bars,
+                               pass_threshold, flucht_min_share)
     breaks = scan_breaks(contour, openings, run_axis)
 
     groups: list[PlacementGroup] = []

@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.7.0</Version>
+    <Version>0.7.1</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -374,6 +374,14 @@
         <Text>Automatische Stösse</Text>
         <ValueType>Expander</ValueType>
         <Parameters>
+          <Parameter>
+            <Name>FluchtMinShare</Name>
+            <Text>Fluchten nutzen ab Kantenanteil [%]</Text>
+            <Value>25</Value>
+            <MinValue>0</MinValue>
+            <MaxValue>100</MaxValue>
+            <ValueType>Integer</ValueType>
+          </Parameter>
           <Parameter>
             <Name>PassBarThreshold</Name>
             <Text>Passeisen-Grenze (mind. ein Stoss ab)</Text>

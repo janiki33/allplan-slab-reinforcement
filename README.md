@@ -560,9 +560,13 @@ Anzahl Verlegungen — Stösse selbst kosten nichts.** Kein Stossraster.
    schieben. Kürzere Eisen dürfen Passeisen sein.
 3. **Fluchten:** Aussparungskanten und einspringende Ecken quer zur
    Stabrichtung sind bevorzugte Stossachsen und laufen durch die ganze
-   Platte (Aussparung → 4 Verlegungen: links/rechts/darüber/darunter).
-   Eine Eck-Flucht entfällt, wenn die kurze Seite ohnehin mittig
-   gestossen wird (≥ Passeisen-Grenze) — dann spart sie keine Verlegung.
+   Platte (Aussparung → 4 Verlegungen: links/rechts/darüber/darunter) —
+   aber nur, wenn sie sich lohnen: die Kante muss mindestens
+   `FluchtMinShare` (Default 25 %) der Plattenbreite belegen. Kleine
+   Aussparungen in grossen Platten fallen durch — dort stösst jedes
+   Segment für sich mittig (belegt am realen Projektbeispiel
+   20.5 × 15 m). Eine Eck-Flucht entfällt zusätzlich, wenn die kurze
+   Seite ohnehin mittig gestossen wird (≥ Passeisen-Grenze).
 4. **Abtreppung:** je Bereich **eine gerade Stosslinie**, geerbt vom
    Pflichtstoss der vollen Bahnen; sie rutscht parallel nach innen, bis
    jedes Stufenstück die `StepMinPieceLength` (Default 2 m) erreicht.
