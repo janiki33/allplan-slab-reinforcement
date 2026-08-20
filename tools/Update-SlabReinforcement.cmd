@@ -19,7 +19,7 @@ title SlabReinforcement aktualisieren
 
 set "REPO=janiki33/allplan-slab-reinforcement"
 set "BRANCH=claude/new-session-8uzquy"
-set "TOOLBRANCH=claude/slab-reinforcement-sync-nykay9"
+set "TOOLBRANCH=claude/new-session-8uzquy"
 set "TARGET=J:\Allplan\Usr\Janosch"
 
 rem Fassung, die das Sync-Skript mindestens haben muss. Verhindert, dass eine
