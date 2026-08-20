@@ -38,7 +38,8 @@ def encode_state(placement_pnt: tuple,
                  detected_openings,
                  drawn_openings,
                  z_offset: float,
-                 thickness_override) -> str:
+                 thickness_override,
+                 walls=None) -> str:
     """Geometriestand in eine Zeichenkette fuer die Palette.
 
     `placement_pnt` als (x, y, z); `contour` als Punktliste oder None;
@@ -53,6 +54,7 @@ def encode_state(placement_pnt: tuple,
         'drawn': [_round_polygon(op) for op in (drawn_openings or [])],
         'z_offset': round(float(z_offset), _PRECISION),
         'thickness': None if thickness_override is None else float(thickness_override),
+        'walls': [_round_polygon(wall) for wall in (walls or [])],
     }
 
     return json.dumps(state, separators=(',', ':'))
@@ -89,6 +91,8 @@ def decode_state(raw: str) -> dict | None:
             'drawn_openings': [_read_polygon(op) for op in state.get('drawn', [])],
             'z_offset': float(state.get('z_offset', 0.0)),
             'thickness_override': None if thickness is None else float(thickness),
+            # Fehlt in Ständen von vor dem Wandanschluss — dann leer
+            'walls': [_read_polygon(wall) for wall in state.get('walls', [])],
         }
     except (KeyError, TypeError, ValueError, IndexError):
         return None

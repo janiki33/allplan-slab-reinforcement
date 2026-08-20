@@ -72,14 +72,17 @@ def _load_helper_modules():
     """
 
     names = ('contour_placement', 'lap_splitting', 'opening_clipping',
-             'opening_reinforcement', 'state_persistence', 'lap_planning')
+             'opening_reinforcement', 'state_persistence', 'lap_planning',
+             'wall_connection')
 
     try:
         from . import (contour_placement, lap_planning,          # noqa: F401
                        lap_splitting, opening_clipping,
-                       opening_reinforcement, state_persistence)
+                       opening_reinforcement, state_persistence,
+                       wall_connection)
         return (contour_placement, lap_splitting, opening_clipping,
-                opening_reinforcement, state_persistence, lap_planning)
+                opening_reinforcement, state_persistence, lap_planning,
+                wall_connection)
     except Exception as relative_error:                # noqa: BLE001
         first_error = relative_error
 
@@ -127,7 +130,8 @@ def _load_helper_modules():
 
 
 (_contour_placement, _lap_splitting, _opening_clipping,
- _opening_reinforcement, _state_persistence, _lap_planning) = _load_helper_modules()
+ _opening_reinforcement, _state_persistence, _lap_planning,
+ _wall_connection) = _load_helper_modules()
 
 compute_contour_bars = _contour_placement.compute_contour_bars
 decompose_into_zones = _contour_placement.decompose_into_zones
@@ -136,6 +140,8 @@ loop_area = _contour_placement.loop_area
 loop_bbox = _contour_placement.loop_bbox
 split_closed_loops = _contour_placement.split_closed_loops
 connection_bar_endpoints = _contour_placement.connection_bar_endpoints
+wall_connection_runs = _wall_connection.wall_connection_runs
+wall_auto_leg_length = _wall_connection.auto_leg_length
 LONGEST = _contour_placement.LONGEST
 SHORTEST = _contour_placement.SHORTEST
 
@@ -160,7 +166,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.7.6'
+SCRIPT_VERSION = '0.8.0'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -181,9 +187,13 @@ INPUT_ELEMENT = 'Element wählen'
 EVENT_ADD_OPENING = 1001
 EVENT_REMOVE_LAST_OPENING = 1002
 EVENT_CLEAR_OPENINGS = 1003
+EVENT_ADD_WALL = 1004
+EVENT_REMOVE_LAST_WALL = 1005
+EVENT_CLEAR_WALLS = 1006
 
 # Eingabestadium "Aussparung zeichnen"
 OPENING_STAGE = 1
+WALL_STAGE = 2
 
 # Lagenschema (Palette: LayerScheme, Bildauswahl)
 LAYER_SCHEME_OUTER_Y = 1     # 1./4. Lage senkrecht -> äussere Lagen in Y
@@ -239,6 +249,7 @@ class SlabReinforcementScript(BaseScriptObject):
         self.polygon_result = PolygonInteractorResult()
         self.opening_result = PolygonInteractorResult()
         self.sel_result = SingleElementSelectResult()
+        self.wall_sel_result = SingleElementSelectResult()
 
         # 0 = Kontur/Absetzpunkt, OPENING_STAGE = Aussparungen zeichnen
         self.input_stage = 0
@@ -251,6 +262,10 @@ class SlabReinforcementScript(BaseScriptObject):
         # gezeichneten sammeln sich über den Button an
         self.detected_openings: list[list[tuple[float, float]]] = []
         self.drawn_openings: list[list[tuple[float, float]]] = []
+
+        # Grundrisse der gewählten Wände (Wandanschluss-Eisen) — wie die
+        # gezeichneten Aussparungen sammeln sie sich über den Button an
+        self.walls: list[list[tuple[float, float]]] = []
         self.z_offset = 0.0
         self.thickness_override: float | None = None
         self._geometry_z: float | None = None
@@ -300,6 +315,7 @@ class SlabReinforcementScript(BaseScriptObject):
         self.contour = None
         self.detected_openings = []
         self.drawn_openings = []
+        self.walls = []
         self.z_offset = 0.0
         self.thickness_override = None
         self.placement_pnt = AllplanGeo.Point3D()
@@ -340,6 +356,13 @@ class SlabReinforcementScript(BaseScriptObject):
         if self.input_stage == OPENING_STAGE:
             self._process_drawn_openings()
             self._finish_input()
+            return
+
+        if self.input_stage == WALL_STAGE:
+            # Gewählte Wand übernehmen und sofort die nächste anbieten —
+            # ESC beendet die Runde (siehe on_cancel_function)
+            self._process_selected_wall()
+            self._start_wall_input(restart=True)
             return
 
         input_method = build_ele.InputMethod.value
@@ -399,7 +422,8 @@ class SlabReinforcementScript(BaseScriptObject):
                 self.detected_openings,
                 self.drawn_openings,
                 self.z_offset,
-                self.thickness_override)
+                self.thickness_override,
+                self.walls)
         except (TypeError, ValueError) as exc:
             print(f'SlabReinforcement: Geometrie konnte nicht gesichert werden ({exc}) — '
                   f'das Element waere nach dem Verlassen nicht mehr bearbeitbar')
@@ -424,6 +448,7 @@ class SlabReinforcementScript(BaseScriptObject):
         self.drawn_openings = state['drawn_openings']
         self.z_offset = state['z_offset']
         self.thickness_override = state['thickness_override']
+        self.walls = state.get('walls', [])
 
         self.input_finished = True
 
@@ -458,6 +483,28 @@ class SlabReinforcementScript(BaseScriptObject):
                       f'entfernt ({len(self.drawn_openings)} verbleiben)')
             else:
                 print('SlabReinforcement: keine gezeichnete Aussparung vorhanden')
+
+            return True
+
+        if event_id == EVENT_ADD_WALL:
+            self._start_wall_input()
+            return True
+
+        if event_id == EVENT_REMOVE_LAST_WALL:
+            if self.walls:
+                self.walls.pop()
+                self._save_state()
+                print(f'SlabReinforcement: letzte Wand entfernt '
+                      f'({len(self.walls)} verbleiben)')
+            else:
+                print('SlabReinforcement: keine Wand gewählt')
+
+            return True
+
+        if event_id == EVENT_CLEAR_WALLS:
+            print(f'SlabReinforcement: {len(self.walls)} Wand/Wände entfernt')
+            self.walls = []
+            self._save_state()
 
             return True
 
@@ -517,6 +564,75 @@ class SlabReinforcementScript(BaseScriptObject):
               f'({len(self.drawn_openings)} gezeichnete insgesamt)')
 
 
+    def _start_wall_input(self, restart: bool = False):
+        """Weitere Auswahlrunde: Wände nacheinander antippen, ESC beendet
+        die Runde (Gegenstück zu _start_opening_input).
+        """
+
+        if not self.input_finished:
+            print('SlabReinforcement: zuerst die Plattenkontur eingeben')
+            return
+
+        self.input_stage = WALL_STAGE
+        self.wall_sel_result = SingleElementSelectResult()
+
+        # InputMode zurück auf INPUT, damit start_next_input das Ergebnis
+        # abholt; input_finished bleibt True, damit die bereits erzeugte
+        # Bewehrung während der Auswahl sichtbar bleibt
+        self.build_ele.InputMode.value = self.build_ele.INPUT_MODE_INPUT
+
+        # Auf Wandtypen filtern, soweit die Konstanten existieren — welche
+        # UUID-Namen die laufende Allplan-Version anbietet, ist nicht
+        # dokumentiert belegbar; ohne Treffer bleibt der Filter leer und
+        # jedes Element ist wählbar (der Grundriss-Leser sortiert dann aus)
+        wall_uuids = [getattr(AllplanEleAdapter, name)
+                      for name in ('Wall_TypeUUID', 'WallTier_TypeUUID',
+                                   'WallStraightTier_TypeUUID')
+                      if hasattr(AllplanEleAdapter, name)]
+
+        self.script_object_interactor = SingleElementSelectInteractor(
+            self.wall_sel_result, wall_uuids,
+            'Wand wählen — ESC beendet die Auswahl')
+
+        self.script_object_interactor.start_input(self.coord_input)
+
+        if not restart:
+            print('SlabReinforcement: Wände nacheinander wählen — '
+                  'ESC beendet die Auswahl')
+
+
+    def _process_selected_wall(self):
+        """Grundriss der gewählten Wand an die Wandliste anhängen."""
+
+        sel_element = self.wall_sel_result.sel_element
+
+        if sel_element is None or (hasattr(sel_element, 'IsNull')
+                                   and sel_element.IsNull()):
+            return
+
+        loops = self._loops_from_element(sel_element)
+
+        if not loops:
+            print('SlabReinforcement: aus dem gewählten Element lässt sich '
+                  'kein Wandgrundriss lesen — übersprungen')
+            return
+
+        # Grösster Loop = Aussenkontur der Wand
+        footprint = max(loops, key=lambda loop: abs(loop_area(loop)))
+
+        # Im Rechteckmodus liegt die Platte im lokalen System des
+        # Absetzpunkts — die Wand kommt global herein
+        if self.build_ele.InputMethod.value == INPUT_RECT:
+            origin = self.placement_pnt
+            footprint = [(x - origin.X, y - origin.Y) for x, y in footprint]
+
+        self.walls.append(footprint)
+        self._save_state()
+
+        print(f'SlabReinforcement: Wand übernommen '
+              f'({len(self.walls)} insgesamt) — nächste wählen oder ESC')
+
+
     def execute(self) -> CreateElementResult:
         """Elemente erzeugen (wird auch bei Parameteränderung erneut gerufen).
 
@@ -534,7 +650,8 @@ class SlabReinforcementScript(BaseScriptObject):
                                    openings=self.openings,
                                    origin=self.placement_pnt,
                                    z_offset=self.z_offset,
-                                   thickness_override=self.thickness_override)
+                                   thickness_override=self.thickness_override,
+                                   walls=self.walls)
 
         return engine.create()
 
@@ -571,6 +688,12 @@ class SlabReinforcementScript(BaseScriptObject):
         """
 
         BuildingElementListService.write_to_default_favorite_file([self.build_ele])
+
+        # Wand-Auswahlrunde: ESC schliesst die Runde ab (die gewählten
+        # Wände bleiben), statt die Eingabe des Interactors zu verwerfen
+        if self.input_stage == WALL_STAGE:
+            self._finish_input()
+            return OnCancelFunctionResult.CREATE_ELEMENTS
 
         if self.script_object_interactor is not None:
             return self.script_object_interactor.on_cancel_function()
@@ -913,12 +1036,14 @@ class SlabReinforcement():
                  openings: list[list[tuple[float, float]]] | None = None,
                  origin: AllplanGeo.Point3D = AllplanGeo.Point3D(),
                  z_offset: float = 0.0,
-                 thickness_override: float | None = None):
+                 thickness_override: float | None = None,
+                 walls: list[list[tuple[float, float]]] | None = None):
         self.build_ele = build_ele
         self.document = doc
 
         self.contour = contour
         self.contour_openings = openings or []
+        self.walls = walls or []
         self.origin = origin
         self.base_z = origin.Z + z_offset
 
@@ -1172,6 +1297,9 @@ class SlabReinforcement():
             for placement in self._create_edge_stirrups():
                 reinf_ele_list.append(placement)
 
+            for placement in self._create_wall_connection_bars():
+                reinf_ele_list.append(placement)
+
             handle_list = self._create_handles()
         else:
             for placement in self._create_contour_edge_reinforcement():
@@ -1182,6 +1310,9 @@ class SlabReinforcement():
                     reinf_ele_list.append(placement)
 
             for placement in self._create_opening_reinforcement():
+                reinf_ele_list.append(placement)
+
+            for placement in self._create_wall_connection_bars():
                 reinf_ele_list.append(placement)
 
             handle_list = HandleList()
@@ -1665,6 +1796,105 @@ class SlabReinforcement():
 
                         self._set_placement_layer(placement, layer.allplan_layer)
                         placements.append(placement)
+
+        return placements
+
+
+    def _create_wall_connection_bars(self) -> list[AllplanReinf.BarPlacement]:
+        """L-förmige Anschlusseisen entlang der gewählten Wände.
+
+        Vorbild ist das Büro-PythonPart "AnschlusseisenBew" (Fall 2,
+        getrennte L-Eisen je Wandseite): vertikaler Schenkel an der
+        Wandseite, um die Stosslänge über OK Platte hinaus (Stoss mit der
+        Wandbewehrung), horizontaler Schenkel unten in der Platte, von der
+        Wand weg. Die Biegeform entsteht wie dort über den
+        ReinforcementShapeBuilder und wird mit Rz = Winkel der
+        Aussennormalen in die Kantenrichtung gedreht (Vorbild: Rz = ±90
+        für die beiden Seiten einer X-parallelen Wand).
+        """
+
+        if not self.walls:
+            return []
+
+        build_ele = self.build_ele
+
+        diameter = float(build_ele.WallBarDiameter.value)
+        spacing = build_ele.WallBarSpacing.value
+
+        if diameter <= 0 or spacing <= 0:
+            return []
+
+        lap = build_ele.WallStossFactor.value * diameter
+
+        if build_ele.WallLegAuto.value:
+            leg = wall_auto_leg_length(lap, self.thickness,
+                                       self.cover_bottom, self.cover_top,
+                                       build_ele.WallMinLeg.value)
+        else:
+            leg = build_ele.WallLegLength.value
+
+        # Stahlgüte wie die Hauptbewehrung (eine Güte je Projekt üblich)
+        steel_grade = self.layers[0].steel_grade if self.layers \
+            else build_ele.BottomXSteelGrade.value
+
+        bending_roller = AllplanReinf.BendingRollerService.GetBendingRollerFactor(
+            diameter, steel_grade, -1, False)
+
+        shape_props = ReinforcementShapeProperties.rebar(
+            diameter, bending_roller, steel_grade, self.concrete_grade,
+            AllplanReinf.BendingShapeType.Stirrup)
+
+        if self.contour is not None:
+            slab_contour = self.contour
+        else:
+            slab_contour = [(0.0, 0.0), (self.length, 0.0),
+                            (self.length, self.width), (0.0, self.width)]
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        for wall in self.walls:
+            runs = wall_connection_runs(wall, slab_contour,
+                                        min_run_length=spacing)
+
+            if not runs:
+                print('SlabReinforcement: Wand liegt nicht über der Platte '
+                      'oder ist zu kurz — keine Anschlusseisen')
+                continue
+
+            for run in runs:
+                # Biegeform in der Ebene: y = Höhe über UK Platte, x = Schenkel.
+                # Deckungswerte je Segment wie im Vorbild: die seitliche
+                # Deckung schiebt den vertikalen Schenkel in die Wand, die
+                # untere hebt den Plattenschenkel an; der Schenkelpunkt wird
+                # um die seitliche Deckung verlängert, damit das Nettomass
+                # erhalten bleibt (Vorbild: l_stoss + con_cover)
+                shape_builder = AllplanReinf.ReinforcementShapeBuilder()
+                shape_builder.AddPoints([
+                    (AllplanGeo.Point2D(0.0, self.thickness + lap), 0.0),
+                    (AllplanGeo.Point2D(0.0, 0.0), self.cover_side),
+                    (AllplanGeo.Point2D(leg + self.cover_side, 0.0),
+                     self.cover_bottom),
+                    (0.0)])
+
+                shape = shape_builder.CreateShape(shape_props)
+
+                if not shape.IsValid():
+                    print('SlabReinforcement: Anschlusseisen-Form ungültig — '
+                          'übersprungen')
+                    continue
+
+                shape.Rotate(RotationAngles(-90, 180, run.outward_deg))
+
+                placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                    self._next_position(), shape,
+                    self._pnt(run.from_pnt[0], run.from_pnt[1], 0.0),
+                    self._pnt(run.to_pnt[0], run.to_pnt[1], 0.0),
+                    self.cover_side, self.cover_side,
+                    spacing)
+
+                self._set_placement_layer(placement,
+                                          build_ele.LayerWallConnect.value)
+                placements.append(placement)
 
         return placements
 

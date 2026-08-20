@@ -20,7 +20,8 @@ keine Kopie kommerzieller Plugins.
 | v0.6 | Aussparungen werden über Palettenbuttons **hinzugefügt** statt vorab festgelegt: beliebig viele, jederzeit, einzeln wieder entfernbar | umgesetzt |
 | v0.7 | Neue Stoss-Systematik nach Bürostandard (14-Formen-Studienblatt): minimale Verlegungsanzahl, Fluchten, Passeisen-Grenze, eine Stosslinie je Abtreppung | umgesetzt |
 | Korrektur | Separates Anschlusseisen im Konturmodus: Vorzeichenfehler behoben, durch den der Stab an einer von zwei gegenüberliegenden Kantenseiten um 2 × Stoßlänge außerhalb der Platte statt mittig auf ihr lag | umgesetzt |
-| v0.8 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
+| v0.8 | Wandanschluss: 3D-Wände antippen, L-förmige Anschlusseisen entlang der langen Wandseiten (Vorbild Büro-PythonPart "AnschlusseisenBew") | umgesetzt |
+| v0.9 | Auflagererkennung (Wände/Unterzüge) mit automatischer Anschlussbewehrung | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
 Original-Beispiele entwickelt und je Ausbaustufe von einem unabhängigen
@@ -48,6 +49,7 @@ PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modu
     opening_reinforcement.py                         Reine Geometrie der Aussparungsbewehrung (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
     state_persistence.py                             Sichert die eingegebene Geometrie ins PythonPart (ohne Allplan, testbar)
+    wall_connection.py                               Reine Geometrie der Wand-Anschlusseisen (ohne Allplan, testbar)
     lap_planning.py                                  Stossplanung nach Bürosystematik (ohne Allplan, testbar)
 tests/                                               Unit-Tests der Geometriemodule (laufen ohne Allplan)
 tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
@@ -162,6 +164,31 @@ Die geplante Aufgabe läuft im angemeldeten Benutzerkontext, weil das verbundene
 Laufwerk `J:` nur dort existiert. Meldet das Protokoll trotzdem
 „Zielverzeichnis nicht erreichbar", stattdessen den UNC-Pfad übergeben, z. B.
 `-AllplanUsr \\server\freigabe\Allplan\Usr\Janosch`.
+
+## Wandanschluss (Anschlusseisen an 3D-Wänden)
+
+Auf der Palettenseite **Wandanschluss** werden — wie bei den Aussparungen —
+Wände über einen Button **nacheinander angetippt** (ESC beendet die Runde,
+jederzeit wiederholbar, einzeln oder komplett wieder entfernbar). Aus jeder
+Wand wird der Grundriss gelesen; entlang der **langen Wandseiten** entsteht
+je eine Verlegung L-förmiger Anschlusseisen:
+
+- **Vertikaler Schenkel** an der Wandseite (seitliche Deckung in die Wand),
+  ragt um `Stossfaktor × ø` über OK Platte — Stoss mit der Wandbewehrung.
+- **Horizontaler Schenkel** unten in der Platte, von der Wand weg. Länge
+  automatisch nach dem Büro-Vorbild (`Stosslänge − verfügbarer Weg in der
+  Plattendicke`, mindestens die Mindest-Schenkellänge, auf 10 mm gerundet)
+  oder fest vorgegeben.
+
+Biegeform und Rotation folgen dem Büro-PythonPart „AnschlusseisenBew"
+(Fall 2, getrennte L-Eisen je Wandseite): `ReinforcementShapeBuilder` mit
+Deckungswerten je Segment, gedreht mit `Rz = Winkel der Aussennormalen`.
+
+Die kurzen **Stirnseiten** der Wand bekommen keine Eisen (Kanten kürzer als
+1.6 × Wanddicke entfallen). Wände dürfen über die Platte hinauslaufen — die
+Verlegung wird an der Plattenkontur abgeschnitten; Reststücke unter einem
+Stababstand entfallen. Die gewählten Wände werden mit dem PythonPart
+gespeichert und überleben das spätere Bearbeiten.
 
 ## Späteres Bearbeiten eines abgesetzten PythonParts
 

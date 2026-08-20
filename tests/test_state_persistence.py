@@ -54,6 +54,21 @@ class TestRoundTrip(unittest.TestCase):
 
         self.assertIsNone(state['thickness_override'])
 
+    def test_waende_ueberleben(self):
+        walls = [[(1000.0, 2000.0), (4000.0, 2000.0),
+                  (4000.0, 2240.0), (1000.0, 2240.0)]]
+        state = decode_state(encode_state((0, 0, 0), None, [], [], 0.0, None,
+                                          walls=walls))
+
+        self.assertEqual(state['walls'], walls)
+
+    def test_alter_stand_ohne_waende_liefert_leere_liste(self):
+        # Stand aus einer Fassung vor dem Wandanschluss
+        raw = encode_state((0, 0, 0), None, [], [], 0.0, None)
+        state = decode_state(raw.replace(',"walls":[]', ''))
+
+        self.assertEqual(state['walls'], [])
+
     def test_leere_kontur_bleibt_none(self):
         """None unterscheidet den Rechteck- vom Konturmodus."""
 

@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.7.6</Version>
+    <Version>0.8.0</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -606,6 +606,92 @@
             <MinValue>25</MinValue>
             <ValueType>Length</ValueType>
             <Visible>DiagonalActive</Visible>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+    </Parameters>
+  </Page>
+  <Page>
+    <Name>WallPage</Name>
+    <Text>Wandanschluss</Text>
+    <Parameters>
+      <Parameter>
+        <Name>WallSelectExpander</Name>
+        <Text>Wände</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>AddWallButton</Name>
+            <Text>Wand wählen (hinzufügen)</Text>
+            <EventId>1004</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>RemoveLastWallButton</Name>
+            <Text>Letzte Wand entfernen</Text>
+            <EventId>1005</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>ClearWallsButton</Name>
+            <Text>Alle Wände entfernen</Text>
+            <EventId>1006</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
+        <Name>WallBarExpander</Name>
+        <Text>Anschlusseisen</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>WallBarDiameter</Name>
+            <Text>Durchmesser</Text>
+            <Value>12</Value>
+            <ValueType>ReinfBarDiameter</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>WallBarSpacing</Name>
+            <Text>Stababstand</Text>
+            <Value>150</Value>
+            <MinValue>25</MinValue>
+            <ValueType>Length</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>WallStossFactor</Name>
+            <Text>Stossfaktor (x ø über OK Platte)</Text>
+            <Value>50</Value>
+            <MinValue>10</MinValue>
+            <ValueType>Integer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>WallLegAuto</Name>
+            <Text>Schenkellänge automatisch</Text>
+            <Value>True</Value>
+            <ValueType>CheckBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>WallLegLength</Name>
+            <Text>Schenkellänge</Text>
+            <Value>800</Value>
+            <MinValue>50</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>WallLegAuto == False</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>WallMinLeg</Name>
+            <Text>Mindest-Schenkellänge</Text>
+            <Value>200</Value>
+            <MinValue>50</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>WallLegAuto</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>LayerWallConnect</Name>
+            <Text>Layer Anschlusseisen (0 = aktueller Layer)</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
           </Parameter>
         </Parameters>
       </Parameter>
