@@ -1,20 +1,30 @@
-﻿<#
+<#
 .SYNOPSIS
     Synchronisiert die SlabReinforcement-Dateien aus GitHub in das lokale
     Allplan-Benutzerverzeichnis.
 
 .DESCRIPTION
-    Laedt die Skript- und Bibliotheksdateien direkt von raw.githubusercontent.com
-    und schreibt sie nur dann, wenn sich der Inhalt tatsaechlich geaendert hat.
-    GitHub ist dabei immer die Quelle der Wahrheit - lokale Aenderungen an den
-    synchronisierten Dateien werden ueberschrieben.
+    Spiegelt zwei Ordner aus dem Repository:
 
-    Bei einer Aenderung wird zusaetzlich der __pycache__-Ordner im Zielverzeichnis
-    geleert, damit Allplan die neuen Module beim naechsten Start wirklich laedt.
+        PythonPartsScripts/SlabReinforcement  ->  <AllplanUsr>\PythonPartsScripts\SlabReinforcement
+        Library/SlabReinforcement             ->  <AllplanUsr>\Library\SlabReinforcement
+
+    Welche Dateien darin liegen, fragt das Skript bei jedem Lauf ueber die
+    GitHub-API ab - es gibt also keine fest verdrahtete Dateiliste, die bei
+    einer Umbenennung veraltet. Verglichen wird ueber den Git-Blob-Hash;
+    heruntergeladen wird nur, was sich tatsaechlich unterscheidet.
+
+    GitHub ist die Quelle der Wahrheit: lokale Aenderungen an den gespiegelten
+    Dateien werden ueberschrieben, und lokale .py/.pyp-Dateien, die es im
+    Repository nicht (mehr) gibt, werden geloescht - genau das faengt
+    Umbenennungen ab, die sonst als Karteileiche den Import blockieren.
+    Mit -KeepExtraFiles unterbleibt das Loeschen.
+
+    Bei jeder Aenderung wird zusaetzlich __pycache__ geleert, damit Allplan
+    die Module wirklich neu laedt.
 
 .PARAMETER AllplanUsr
-    Wurzel des Allplan-Benutzerverzeichnisses. Darunter werden
-    PythonPartsScripts\SlabReinforcement und Library\SlabReinforcement erwartet.
+    Wurzel des Allplan-Benutzerverzeichnisses.
 
 .PARAMETER Branch
     Zu synchronisierender Git-Branch.
@@ -23,23 +33,22 @@
     Wenn gesetzt, laeuft das Skript dauerhaft und prueft im angegebenen Abstand
     erneut. Ohne diesen Parameter laeuft es genau einmal durch.
 
-.PARAMETER RemoveStale
-    Entfernt veraltete Dateien aus dem Zielordner (SlabReinforcement.py und
-    SlabReinforcementScript.py aus frueheren Versionen). Das PythonPart ist
-    inzwischen ein Python-Paket: der Ordner SlabReinforcement enthaelt ein
-    __init__.py, die .pyp verweist auf SlabReinforcement.py - eine Datei, die
-    es bewusst nicht gibt. Eine uebriggebliebene gleichnamige Datei wuerde den
-    Paketordner verdecken.
+.PARAMETER KeepExtraFiles
+    Lokale .py/.pyp-Dateien behalten, die es im Repository nicht gibt.
+
+.PARAMETER Token
+    Optionales GitHub-Token. Nur noetig, wenn das Limit fuer nicht
+    angemeldete API-Zugriffe (60 pro Stunde und IP) knapp wird.
 
 .PARAMETER Install
-    Registriert eine geplante Aufgabe (Task Scheduler), die diesen Sync bei der
-    Anmeldung und danach alle 10 Minuten ausfuehrt.
+    Registriert eine geplante Aufgabe, die den Abgleich bei der Anmeldung und
+    danach alle 10 Minuten ausfuehrt.
 
 .PARAMETER Uninstall
     Entfernt die mit -Install angelegte geplante Aufgabe wieder.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\Sync-SlabReinforcement.ps1 -RemoveStale
+    powershell -ExecutionPolicy Bypass -File .\Sync-SlabReinforcement.ps1
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\Sync-SlabReinforcement.ps1 -Install
@@ -47,15 +56,19 @@
 
 [CmdletBinding()]
 param(
-    [string]   $AllplanUsr     = 'J:\Allplan\Usr\Janosch',
-    [string]   $Branch         = 'claude/new-session-8uzquy',
-    [string]   $Repo           = 'janiki33/allplan-slab-reinforcement',
-    [int]      $IntervalSeconds = 0,
-    [switch]   $RemoveStale,
-    [switch]   $Install,
-    [switch]   $Uninstall,
-    [string]   $LogFile,
-    [switch]   $Quiet
+    [string] $AllplanUsr      = 'J:\Allplan\Usr\Janosch',
+    [string] $Branch          = 'claude/new-session-8uzquy',
+    [string] $Repo            = 'janiki33/allplan-slab-reinforcement',
+    [int]    $IntervalSeconds = 0,
+    [switch] $KeepExtraFiles,
+    [string] $Token,
+    [switch] $Install,
+    [switch] $Uninstall,
+    [string] $LogFile,
+    [switch] $Quiet,
+    # Nur noch aus Kompatibilitaet: das Entfernen veralteter Dateien ist
+    # inzwischen Standardverhalten des Abgleichs.
+    [switch] $RemoveStale
 )
 
 Set-StrictMode -Version Latest
@@ -66,29 +79,18 @@ $ErrorActionPreference = 'Stop'
 
 $TaskName = 'AllplanSlabReinforcementSync'
 
-# Quelle (Pfad im Repo) -> Ziel (Pfad relativ zu $AllplanUsr)
-$FileMap = @(
-    @{ Source = 'PythonPartsScripts/SlabReinforcement/__init__.py'
-       Target = 'PythonPartsScripts\SlabReinforcement\__init__.py' }
-    @{ Source = 'PythonPartsScripts/SlabReinforcement/slab_reinforcement.py'
-       Target = 'PythonPartsScripts\SlabReinforcement\slab_reinforcement.py' }
-    @{ Source = 'PythonPartsScripts/SlabReinforcement/contour_placement.py'
-       Target = 'PythonPartsScripts\SlabReinforcement\contour_placement.py' }
-    @{ Source = 'PythonPartsScripts/SlabReinforcement/opening_clipping.py'
-       Target = 'PythonPartsScripts\SlabReinforcement\opening_clipping.py' }
-    @{ Source = 'PythonPartsScripts/SlabReinforcement/opening_reinforcement.py'
-       Target = 'PythonPartsScripts\SlabReinforcement\opening_reinforcement.py' }
-    @{ Source = 'PythonPartsScripts/SlabReinforcement/lap_splitting.py'
-       Target = 'PythonPartsScripts\SlabReinforcement\lap_splitting.py' }
-    @{ Source = 'Library/SlabReinforcement/SlabReinforcement.pyp'
-       Target = 'Library\SlabReinforcement\SlabReinforcement.pyp' }
+# Wird beim Start protokolliert und von Update-SlabReinforcement.cmd geprueft,
+# damit nie unbemerkt eine veraltete Fassung aus einem Cache laeuft.
+$ScriptVersion = 2
+
+# Gespiegelte Ordner: Pfad im Repository -> Pfad relativ zu $AllplanUsr
+$SyncDirs = @(
+    @{ Source = 'PythonPartsScripts/SlabReinforcement'; Target = 'PythonPartsScripts\SlabReinforcement' }
+    @{ Source = 'Library/SlabReinforcement';            Target = 'Library\SlabReinforcement' }
 )
 
-# Dateien, die aus frueheren Versionen stammen und nicht mehr vorhanden sein duerfen.
-$StaleFiles = @(
-    'PythonPartsScripts\SlabReinforcement\SlabReinforcement.py'
-    'PythonPartsScripts\SlabReinforcement\SlabReinforcementScript.py'
-)
+# Nur diese Dateitypen werden gespiegelt und ggf. lokal aufgeraeumt.
+$SyncedExtensions = @('.py', '.pyp')
 
 
 function Write-Log {
@@ -117,46 +119,92 @@ function Write-Log {
             Add-Content -LiteralPath $LogFile -Value $line -Encoding UTF8
         }
         catch {
-            # Ein nicht schreibbares Logfile darf den Sync nicht abbrechen.
+            # Ein nicht schreibbares Logfile darf den Abgleich nicht abbrechen.
         }
     }
 }
 
 
-function Get-Sha256 {
-    param([Parameter(Mandatory)][byte[]] $Bytes)
+function Get-RequestHeaders {
+    $headers = @{
+        'Cache-Control' = 'no-cache'
+        'Pragma'        = 'no-cache'
+        'User-Agent'    = 'AllplanSlabReinforcementSync'
+    }
+    if ($Token) {
+        $headers['Authorization'] = "Bearer $Token"
+    }
+    return $headers
+}
 
-    $sha = [System.Security.Cryptography.SHA256]::Create()
+
+function Get-GitBlobSha {
+    <# Git-Blob-Hash einer Datei: sha1("blob <laenge>\0" + inhalt).
+       Damit laesst sich direkt gegen das sha-Feld der GitHub-API vergleichen. #>
+    param([Parameter(Mandatory)][string] $Path)
+
+    $bytes  = [System.IO.File]::ReadAllBytes($Path)
+    $header = [System.Text.Encoding]::ASCII.GetBytes('blob ' + $bytes.Length + [char]0)
+
+    $buffer = New-Object byte[] ($header.Length + $bytes.Length)
+    [Array]::Copy($header, 0, $buffer, 0, $header.Length)
+    [Array]::Copy($bytes, 0, $buffer, $header.Length, $bytes.Length)
+
+    $sha1 = [System.Security.Cryptography.SHA1]::Create()
     try {
-        return [BitConverter]::ToString($sha.ComputeHash($Bytes)).Replace('-', '')
+        return [BitConverter]::ToString($sha1.ComputeHash($buffer)).Replace('-', '').ToLowerInvariant()
     }
     finally {
-        $sha.Dispose()
+        $sha1.Dispose()
     }
 }
 
 
-function Get-RemoteBytes {
-    param([Parameter(Mandatory)][string] $Url)
+function Get-RemoteListing {
+    <# Verzeichnisinhalt eines Repository-Ordners ueber die GitHub-API.
+       Der Branch steht als Query-Parameter, damit Schraegstriche im
+       Branchnamen (claude/...) nicht den Pfad zerlegen. #>
+    param([Parameter(Mandatory)][string] $Path)
 
-    # Ueber -OutFile, damit der Inhalt nie durch eine String-Dekodierung laeuft -
-    # sonst koennten Umlaute und Zeilenenden je nach PowerShell-Version kippen.
-    # 'no-cache' umgeht den CDN-Cache von raw.githubusercontent.com, der sonst
-    # bis zu fuenf Minuten alte Staende ausliefert.
-    $temp = [System.IO.Path]::GetTempFileName()
+    $uri = 'https://api.github.com/repos/{0}/contents/{1}?ref={2}' -f `
+           $Repo, $Path, [uri]::EscapeDataString($Branch)
+
+    $entries = Invoke-RestMethod -Uri $uri -Headers (Get-RequestHeaders) -TimeoutSec 60
+
+    return @($entries) |
+        Where-Object { $_.type -eq 'file' } |
+        ForEach-Object {
+            [pscustomobject]@{
+                Name        = $_.name
+                Sha         = $_.sha
+                DownloadUrl = $_.download_url
+            }
+        }
+}
+
+
+function Save-RemoteFile {
+    param(
+        [Parameter(Mandatory)][string] $Url,
+        [Parameter(Mandatory)][string] $Destination
+    )
+
+    # Erst in eine Nebendatei laden, dann umbenennen: bricht der Download ab,
+    # bleibt die bisherige Fassung unangetastet.
+    $temp = "$Destination.download"
     try {
-        Invoke-WebRequest -Uri $Url `
-                          -Headers @{ 'Cache-Control' = 'no-cache'; 'Pragma' = 'no-cache' } `
+        Invoke-WebRequest -Uri $Url -Headers (Get-RequestHeaders) `
                           -UseBasicParsing -TimeoutSec 60 -OutFile $temp | Out-Null
 
-        $bytes = [System.IO.File]::ReadAllBytes($temp)
-        if ($bytes.Length -eq 0) {
+        if ((Get-Item -LiteralPath $temp).Length -eq 0) {
             throw "Leere Antwort von $Url"
         }
-        return $bytes
+
+        Move-Item -LiteralPath $temp -Destination $Destination -Force
     }
-    finally {
+    catch {
         Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        throw
     }
 }
 
@@ -177,79 +225,103 @@ function Clear-PyCache {
 }
 
 
-function Invoke-SyncPass {
-    $baseUrl = "https://raw.githubusercontent.com/$Repo/$Branch"
-    $changed = 0
-    $failed  = 0
-    $touchedDirs = New-Object System.Collections.Generic.HashSet[string]
+function Sync-Directory {
+    param([Parameter(Mandatory)][hashtable] $Entry)
 
-    foreach ($entry in $FileMap) {
-        $url        = "$baseUrl/$($entry.Source)"
-        $targetPath = Join-Path $AllplanUsr $entry.Target
-        $targetDir  = Split-Path -Parent $targetPath
+    $result    = [pscustomobject]@{ Changed = 0; Failed = 0 }
+    $targetDir = Join-Path $AllplanUsr $Entry.Target
 
-        try {
-            $remoteBytes = Get-RemoteBytes -Url $url
-        }
-        catch {
-            Write-Log "Download fehlgeschlagen: $($entry.Source) - $($_.Exception.Message)" -Level ERROR
-            $failed++
-            continue
-        }
+    try {
+        $remoteFiles = @(Get-RemoteListing -Path $Entry.Source)
+    }
+    catch {
+        Write-Log "Verzeichnis $($Entry.Source) nicht abrufbar: $($_.Exception.Message)" -Level ERROR
+        $result.Failed++
+        return $result
+    }
 
-        $remoteHash = Get-Sha256 -Bytes $remoteBytes
+    $remoteFiles = @($remoteFiles | Where-Object { $SyncedExtensions -contains [System.IO.Path]::GetExtension($_.Name) })
+
+    if ($remoteFiles.Count -eq 0) {
+        Write-Log "$($Entry.Source) enthaelt keine abzugleichenden Dateien - uebersprungen." -Level WARN
+        return $result
+    }
+
+    if (-not (Test-Path -LiteralPath $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        Write-Log "Ordner angelegt: $targetDir"
+    }
+
+    foreach ($file in $remoteFiles) {
+        $targetPath = Join-Path $targetDir $file.Name
 
         if (Test-Path -LiteralPath $targetPath) {
-            $localHash = Get-Sha256 -Bytes ([System.IO.File]::ReadAllBytes($targetPath))
-            if ($localHash -eq $remoteHash) {
-                Write-Log "unveraendert: $($entry.Target)"
+            if ((Get-GitBlobSha -Path $targetPath) -eq $file.Sha) {
+                Write-Log "unveraendert: $($Entry.Target)\$($file.Name)"
                 continue
             }
         }
-        elseif (-not (Test-Path -LiteralPath $targetDir)) {
-            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-            Write-Log "Ordner angelegt: $targetDir"
+
+        try {
+            Save-RemoteFile -Url $file.DownloadUrl -Destination $targetPath
+            Write-Log "aktualisiert: $($Entry.Target)\$($file.Name)" -Level CHANGE
+            $result.Changed++
+        }
+        catch {
+            Write-Log "Abgleich fehlgeschlagen: $($Entry.Target)\$($file.Name) - $($_.Exception.Message)" -Level ERROR
+            $result.Failed++
+        }
+    }
+
+    # Lokale Karteileichen entfernen - dank vollstaendiger Verzeichnisliste
+    # sind das genau die Dateien, die im Repository umbenannt oder geloescht
+    # wurden.
+    $remoteNames = @($remoteFiles | ForEach-Object { $_.Name })
+
+    foreach ($local in @(Get-ChildItem -LiteralPath $targetDir -File -ErrorAction SilentlyContinue)) {
+        if ($SyncedExtensions -notcontains $local.Extension) { continue }
+        if ($remoteNames -contains $local.Name)              { continue }
+
+        if ($KeepExtraFiles) {
+            Write-Log ("Nicht im Repository: $($Entry.Target)\$($local.Name) - bleibt liegen " +
+                       "(-KeepExtraFiles gesetzt), kann den Import stoeren.") -Level WARN
+            continue
         }
 
         try {
-            [System.IO.File]::WriteAllBytes($targetPath, $remoteBytes)
-            Write-Log "aktualisiert: $($entry.Target)" -Level CHANGE
-            $changed++
-            [void]$touchedDirs.Add($targetDir)
+            Remove-Item -LiteralPath $local.FullName -Force
+            Write-Log "entfernt (nicht mehr im Repository): $($Entry.Target)\$($local.Name)" -Level CHANGE
+            $result.Changed++
         }
         catch {
-            Write-Log "Schreiben fehlgeschlagen: $targetPath - $($_.Exception.Message)" -Level ERROR
-            $failed++
+            Write-Log "Loeschen fehlgeschlagen: $($local.FullName) - $($_.Exception.Message)" -Level ERROR
+            $result.Failed++
         }
     }
 
-    foreach ($stale in $StaleFiles) {
-        $stalePath = Join-Path $AllplanUsr $stale
-        if (-not (Test-Path -LiteralPath $stalePath)) { continue }
-
-        if ($RemoveStale) {
-            try {
-                Remove-Item -LiteralPath $stalePath -Force
-                Write-Log "veraltete Datei entfernt: $stale" -Level CHANGE
-                [void]$touchedDirs.Add((Split-Path -Parent $stalePath))
-            }
-            catch {
-                Write-Log "Loeschen fehlgeschlagen: $stalePath - $($_.Exception.Message)" -Level ERROR
-                $failed++
-            }
-        }
-        else {
-            Write-Log ("Veraltete Datei vorhanden: $stale - sie kollidiert mit dem Paketordner " +
-                       "und verhindert den Import. Einmal mit -RemoveStale ausfuehren.") -Level WARN
-        }
+    if ($result.Changed -gt 0) {
+        Clear-PyCache -Directory $targetDir
     }
 
-    foreach ($dir in $touchedDirs) {
-        Clear-PyCache -Directory $dir
+    return $result
+}
+
+
+function Invoke-SyncPass {
+    $changed = 0
+    $failed  = 0
+
+    foreach ($entry in $SyncDirs) {
+        $r = Sync-Directory -Entry $entry
+        $changed += $r.Changed
+        $failed  += $r.Failed
     }
 
     if ($changed -gt 0) {
-        Write-Log "$changed Datei(en) aktualisiert - Allplan neu starten bzw. Palette neu laden." -Level CHANGE
+        Write-Log "$changed Aenderung(en) uebernommen - Allplan neu starten." -Level CHANGE
+    }
+    elseif ($failed -eq 0) {
+        Write-Log 'Alles bereits auf dem Stand von GitHub.'
     }
 
     return $failed
@@ -273,7 +345,6 @@ function Install-SyncTask {
         "-Branch `"$Branch`""
         "-Repo `"$Repo`""
         "-LogFile `"$logPath`""
-        '-RemoveStale'
         '-Quiet'
     ) -join ' '
 
@@ -325,7 +396,7 @@ if ($Uninstall) {
 
 if ($Install) {
     Install-SyncTask
-    Write-Log 'Fuehre einen ersten Sync aus ...'
+    Write-Log 'Fuehre einen ersten Abgleich aus ...'
 }
 
 if (-not (Test-Path -LiteralPath $AllplanUsr)) {
@@ -333,7 +404,7 @@ if (-not (Test-Path -LiteralPath $AllplanUsr)) {
     exit 2
 }
 
-Write-Log "Sync $Repo@$Branch -> $AllplanUsr"
+Write-Log "Abgleich $Repo@$Branch -> $AllplanUsr (Skriptfassung $ScriptVersion)"
 
 if ($IntervalSeconds -gt 0) {
     Write-Log "Dauerbetrieb: Pruefung alle $IntervalSeconds Sekunden (Abbruch mit Strg+C)."
