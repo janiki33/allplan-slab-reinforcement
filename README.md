@@ -253,7 +253,8 @@ verifiziert.
   (Anzahl, Ø, Abstand) und Übergreifungslänge sind frei konfigurierbar.
 - **Allgemein:** Betongüte, seitliche Deckung, Mindeststablänge (kürzere
   Reststücke neben Öffnungen entfallen ersatzlos), Format-Eigenschaften,
-  Allplan-Layer je Lage und für die Randbügel (0 = aktueller Layer),
+  Allplan-Layer je Lage (0 = aktueller Layer; Randbügel und
+  Öffnungszulagen erben den Layer der Lage ihrer Richtung),
   „Als PythonPart erzeugen".
 
 Bei jeder Parameteränderung ruft Allplan `create_element` neu auf —

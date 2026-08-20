@@ -1084,6 +1084,9 @@ class SlabReinforcement():
                 edge_layer.bending_roller = AllplanReinf.BendingRollerService.GetBendingRollerFactor(
                     edge_layer.diameter, edge_layer.steel_grade, -1, False)
 
+                # Layer der Hauptlage gleicher Richtung und Höhenlage
+                edge_layer.allplan_layer = main_layer.allplan_layer
+
                 edge_layers.append(edge_layer)
 
         placements: list[AllplanReinf.BarPlacement] = []
@@ -1123,15 +1126,17 @@ class SlabReinforcement():
                         from_pnt = self._pnt(run.dist_from, piece_from, edge_layer.z_axis)
                         to_pnt = self._pnt(run.dist_to, piece_from, edge_layer.z_axis)
 
-                    placements.append(
-                        LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
-                            self._next_position(),
-                            shape,
-                            from_pnt,
-                            to_pnt,
-                            0,
-                            0,
-                            bar_count))
+                    placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_count(
+                        self._next_position(),
+                        shape,
+                        from_pnt,
+                        to_pnt,
+                        0,
+                        0,
+                        bar_count)
+
+                    self._set_placement_layer(placement, edge_layer.allplan_layer)
+                    placements.append(placement)
 
         return placements
 
@@ -1249,8 +1254,9 @@ class SlabReinforcement():
 
             no_cover = ConcreteCoverProperties(0.0, 0.0, 0.0, 0.0)
 
-            stirrup_layer_id = self.build_ele.LayerStirrupX.value if direction == 'X' \
-                else self.build_ele.LayerStirrupY.value
+            # Layer wie die Lage, die in Bügelrichtung verläuft — dieselbe
+            # Lage, von der auch Ø, Abstand und Stahlgüte stammen
+            stirrup_layer_id = bottom_layer.allplan_layer
 
             if direction == 'X':
                 run_len, dist_len = self.length, self.width

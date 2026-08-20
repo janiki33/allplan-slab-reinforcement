@@ -554,18 +554,6 @@
             <Value>0</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
-          <Parameter>
-            <Name>LayerStirrupX</Name>
-            <Text>Layer Randbügel links/rechts</Text>
-            <Value>0</Value>
-            <ValueType>Layer</ValueType>
-          </Parameter>
-          <Parameter>
-            <Name>LayerStirrupY</Name>
-            <Text>Layer Randbügel unten/oben</Text>
-            <Value>0</Value>
-            <ValueType>Layer</ValueType>
-          </Parameter>
         </Parameters>
       </Parameter>
       <Parameter>
