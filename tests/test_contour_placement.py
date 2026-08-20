@@ -7,9 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScripts' / 'SlabReinforcement'))
 
-from contour_placement import (compute_contour_bars, edge_setback,
-                               group_bars_into_runs, group_bars_into_steps,
-                               loop_area, loop_bbox, scan_positions,
+from contour_placement import (LONGEST, SHORTEST, _round_outward,
+                               bar_parallel_breaks,
+                               compute_contour_bars, decompose_into_zones,
+                               edge_setback, group_bars_into_runs,
+                               group_bars_into_steps, loop_area, loop_bbox,
+                               parallel_edges, scan_positions,
                                split_closed_loops)
 
 RECT = [(0, 0), (5000, 0), (5000, 4000), (0, 4000)]
@@ -277,6 +280,313 @@ class GroupBarsIntoStepsTest(unittest.TestCase):
         # Bereiche mit 1 und mit 2 Segmenten dürfen nie in derselben Stufe liegen
         self.assertGreaterEqual(len(steps), 3)
         self.assertTrue(any(len(step.segments) == 2 for step in steps))
+
+
+class DecompositionTest(unittest.TestCase):
+    """Schritt 1: Zerlegung in Rechtecke, ausgerichtet nach der Stabrichtung."""
+
+    # Treppenkontur mit Schräge unten rechts (wie die Beispielplatte)
+    SLAB = [(0, 0), (6748, 0), (10214, 5131), (10214, 9240), (6748, 9240),
+            (6748, 6798), (3416, 6798), (3416, 3135), (2095, 3135),
+            (2095, 5131), (0, 5131)]
+
+    def _zones(self, run_axis, deviation=250.0):
+        bars = compute_contour_bars(self.SLAB, [], run_axis, 150.0, 40.0, 300.0,
+                                    max_setback=150.0, dist_margin=46.0)
+        return bars, decompose_into_zones(self.SLAB and bars, self.SLAB, run_axis,
+                                          deviation, 50.0, 300.0)
+
+    def test_breaks_follow_the_bar_direction(self):
+        # Stäbe in Y -> Sprünge an den senkrechten Kanten (x-Werte)
+        self.assertEqual(bar_parallel_breaks(self.SLAB, 1),
+                         [0, 2095, 3416, 6748, 10214])
+
+        # Stäbe in X -> Sprünge an den waagrechten Kanten (y-Werte)
+        self.assertEqual(bar_parallel_breaks(self.SLAB, 0),
+                         [0, 3135, 5131, 6798, 9240])
+
+    def test_rectangles_differ_per_layer(self):
+        _, zones_y = self._zones(1)
+        _, zones_x = self._zones(0)
+
+        rects_y = [z for z in zones_y if z.kind == 'rect']
+        rects_x = [z for z in zones_x if z.kind == 'rect']
+
+        self.assertEqual(len(rects_y), 4)
+        self.assertEqual(len(rects_x), 4)
+        self.assertNotEqual([z.segments[0] for z in rects_y],
+                            [z.segments[0] for z in rects_x])
+
+    def test_rectangle_bars_all_have_the_same_length(self):
+        _, zones = self._zones(1)
+
+        for zone in [z for z in zones if z.kind == 'rect']:
+            self.assertEqual(len(set(zone.segments)), 1)
+
+    def test_slanted_part_becomes_step_zones(self):
+        _, zones = self._zones(1)
+
+        steps = [z for z in zones if z.kind == 'step']
+
+        self.assertGreater(len(steps), 1)
+        # Stufen werden zur Schräge hin kürzer
+        lengths = [z.segments[0][0][1] - z.segments[0][0][0] for z in steps]
+        self.assertGreater(lengths[0], lengths[-1])
+
+    def test_step_is_measured_on_the_longest_bar(self):
+        bars, zones = self._zones(1)
+
+        # Die Stufenzone deckt hier den Bereich unterhalb des Rechtecks ab;
+        # ihr unteres Ende muss dem *längsten* (am tiefsten reichenden) Stab
+        # der Stufe folgen, nicht dem kürzesten.
+        available = {bar.position: bar.segments[0][0] for bar in bars}
+
+        for zone in [z for z in zones if z.kind == 'step']:
+            built_from = zone.segments[0][0][0]
+            own = [available[p] for p in zone.positions if p in available]
+
+            if not own:
+                continue
+
+            # bis zum längsten Stab (das Raster rundet dort nach aussen)
+            self.assertLessEqual(built_from, min(own) + 1e-6)
+            # und nicht am kürzesten Stab abgeschnitten
+            self.assertLess(built_from, max(own) + 1e-6)
+
+    def test_overshoot_stays_within_the_allowance(self):
+        deviation = 250.0
+        bars, zones = self._zones(1, deviation)
+
+        available = {bar.position: bar.segments for bar in bars}
+        raster = 50.0
+
+        for zone in [z for z in zones if z.kind == 'step']:
+            built = zone.segments[0][0]
+
+            for position in zone.positions:
+                for own_from, own_to in available.get(position, ()):
+                    # Stufe darf den Stab verlängern, aber nur begrenzt
+                    # (zusätzlich bis zu einem Raster je Ende durch die Rundung)
+                    overshoot = max(own_from - built[0], 0) + max(built[1] - own_to, 0)
+                    self.assertLessEqual(overshoot, deviation + 2 * raster + 1e-6)
+
+    def test_round_outward_never_shortens(self):
+        self.assertEqual(_round_outward((1050, 1560), 100), (1000, 1600))
+        self.assertEqual(_round_outward((-1560, -1050), 100), (-1600, -1000))
+        self.assertEqual(_round_outward((1000, 1500), 100), (1000, 1500))
+        self.assertEqual(_round_outward((10, 20), 0), (10, 20))
+
+
+class ZoneVariantTest(unittest.TestCase):
+    """Variante A/B der Rechteckgrenze und Vermeidung von Einzelstäben."""
+
+    SLAB = DecompositionTest.SLAB
+
+    def _zones(self, run_axis, snap):
+        bars = compute_contour_bars(self.SLAB, [], run_axis, 150.0, 40.0, 300.0,
+                                    max_setback=150.0, dist_margin=46.0)
+        return bars, decompose_into_zones(bars, self.SLAB, run_axis, 250.0, 50.0,
+                                          300.0, snap_to_contour=snap)
+
+    def test_variant_a_pulls_the_rectangle_to_a_contour_edge(self):
+        # Mittleres Band der X-Lage: Variante A endet an der Kante x=6748,
+        # Variante B erst am Beginn der Schräge
+        _, zones_a = self._zones(0, True)
+        _, zones_b = self._zones(0, False)
+
+        def middle_end(zones):
+            for zone in zones:
+                if zone.kind != 'rect':
+                    continue
+                for seg_from, seg_to in zone.segments[0]:
+                    if 3300 < seg_from < 3600 and zone.positions[0] > 3000:
+                        return seg_to
+            return None
+
+        self.assertAlmostEqual(middle_end(zones_a), 6748, delta=1)
+        self.assertGreater(middle_end(zones_b), 8000)
+
+    def test_variant_a_creates_more_steps(self):
+        _, zones_a = self._zones(0, True)
+        _, zones_b = self._zones(0, False)
+
+        steps_a = len([z for z in zones_a if z.kind == 'step'])
+        steps_b = len([z for z in zones_b if z.kind == 'step'])
+
+        self.assertGreater(steps_a, steps_b)
+
+    def test_straight_edge_is_not_snapped(self):
+        # Band ohne Schräge darf nicht an einer fremden Kante zerschnitten werden
+        _, zones = self._zones(0, True)
+
+        top = [z for z in zones if z.kind == 'rect' and z.positions[0] > 6800]
+
+        self.assertTrue(top)
+        for zone in top:
+            seg_from, seg_to = zone.segments[0][0]
+            self.assertGreater(seg_to - seg_from, 3000)
+
+    def test_no_single_bar_placements(self):
+        for run_axis in (0, 1):
+            for snap in (True, False):
+                _, zones = self._zones(run_axis, snap)
+
+                for zone in zones:
+                    self.assertGreater(len(zone.positions), 1,
+                                       f'Einzelstab in {zone.kind}-Zone bei '
+                                       f'{zone.positions} (run_axis={run_axis})')
+
+    def test_merged_single_bar_keeps_the_neighbour_length(self):
+        # Der zugeschlagene Stab bekommt die Länge der Nachbarverlegung
+        _, zones = self._zones(1, True)
+
+        for zone in zones:
+            self.assertEqual(len(zone.positions), len(zone.segments))
+            self.assertEqual(len(set(zone.segments)), 1)
+
+
+class EdgeExtensionTest(unittest.TestCase):
+    """Anschlusseisen: Stäbe ragen an ausgewählten Konturkanten über den Rand."""
+
+    def test_extension_replaces_the_cover_at_that_edge(self):
+        plain = compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0)
+        self.assertEqual(plain[0].segments, ((40.0, 4960.0),))
+
+        # Kante 3 ist die linke Kante (von (0,4000) nach (0,0))
+        extended = compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
+                                        edge_extensions={3: 600.0})
+
+        self.assertEqual(extended[0].segments, ((-600.0, 4960.0),))
+
+    def test_other_edges_keep_their_cover(self):
+        extended = compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
+                                        edge_extensions={3: 600.0})
+
+        for bar in extended:
+            self.assertAlmostEqual(bar.segments[0][1], 4960.0, places=6)
+
+    def test_both_ends_can_be_extended(self):
+        extended = compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
+                                        edge_extensions={1: 600.0, 3: 600.0})
+
+        self.assertEqual(extended[0].segments, ((-600.0, 5600.0),))
+
+    def test_no_extensions_behaves_as_before(self):
+        self.assertEqual(compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0),
+                         compute_contour_bars(RECT, [], 0, 500.0, 40.0, 300.0,
+                                              edge_extensions={}))
+
+
+class StepReferenceTest(unittest.TestCase):
+    """Stufenlänge am längsten oder am kürzesten Stab."""
+
+    CONTOUR = [(0, 0), (3000, 0), (5000, 2000), (5000, 4000), (0, 4000)]
+
+    def _zones(self, reference):
+        bars = compute_contour_bars(self.CONTOUR, [], 0, 150, 30, 300,
+                                    dist_margin=34)
+
+        return bars, decompose_into_zones(bars, self.CONTOUR, 0,
+                                          max_step_deviation=250,
+                                          length_raster=50,
+                                          min_bar_length=300,
+                                          step_reference=reference)
+
+    def test_shortest_keeps_every_bar_inside_the_concrete(self):
+        bars, zones = self._zones(SHORTEST)
+        available = {bar.position: bar.segments for bar in bars}
+
+        for zone in zones:
+            for i, built in enumerate(zone.segments[0]):
+                for position in zone.positions:
+                    own = available.get(position, ())
+
+                    if i >= len(own):
+                        continue
+
+                    self.assertGreaterEqual(built[0], own[i][0] - 1e-6)
+                    self.assertLessEqual(built[1], own[i][1] + 1e-6)
+
+    def test_longest_does_extend_beyond_the_concrete(self):
+        bars, zones = self._zones(LONGEST)
+        available = {bar.position: bar.segments for bar in bars}
+
+        overshoots = [built[1] - own[i][1]
+                      for zone in zones if zone.kind == 'step'
+                      for i, built in enumerate(zone.segments[0])
+                      for position in zone.positions
+                      for own in [available.get(position, ())]
+                      if i < len(own)]
+
+        self.assertTrue(any(value > 1.0 for value in overshoots))
+
+    def test_shortest_raster_never_grows_past_the_reference_bar(self):
+        # Bei SHORTEST rundet das Raster nach innen — die gerade erst
+        # gesicherte Deckung darf es nicht wieder auffressen.
+        bars, zones = self._zones(SHORTEST)
+        widest = {bar.position: bar.segments for bar in bars}
+
+        for zone in zones:
+            for i, built in enumerate(zone.segments[0]):
+                own = [widest[p][i] for p in zone.positions
+                       if p in widest and i < len(widest[p])]
+
+                if not own:
+                    continue
+
+                self.assertGreaterEqual(built[0], min(lo for lo, _ in own) - 1e-6)
+                self.assertLessEqual(built[1], max(hi for _, hi in own) + 1e-6)
+
+
+class ParallelEdgeCoverTest(unittest.TestCase):
+    """Im Deckungsstreifen einer stabparallelen Kante darf kein Stab liegen."""
+
+    def test_parallel_edges_of_the_l_shape(self):
+        # Stäbe in X (run_axis 0) -> parallel sind die Kanten mit konstantem y
+        edges = sorted(parallel_edges(L_SHAPE, 0))
+
+        self.assertEqual(edges, [(0.0, 0.0, 5000.0),
+                                 (2000.0, 3000.0, 5000.0),
+                                 (4000.0, 0.0, 3000.0)])
+
+    def test_no_bar_inside_the_cover_of_a_reentrant_edge(self):
+        bars = compute_contour_bars(L_SHAPE, [], 0, 195, 30, 200,
+                                    dist_margin=30)
+
+        for bar in bars:
+            if abs(bar.position - 2000) >= 30:
+                continue
+
+            for seg_from, seg_to in bar.segments:
+                # Kein Segment darf über die Kante y=2000 (x 3000..5000) reichen
+                self.assertLessEqual(seg_from, 3000)
+                self.assertLessEqual(seg_to, 3000)
+
+    def test_bar_is_clipped_not_dropped(self):
+        # y = 30 + 10*195 = 1980 liegt 20 mm unter der Kante y=2000 und wird
+        # bei x=3000 abgeschnitten statt komplett zu entfallen.
+        bars = {bar.position: bar.segments
+                for bar in compute_contour_bars(L_SHAPE, [], 0, 195, 30, 200,
+                                                dist_margin=30)}
+
+        self.assertEqual(bars[1980], ((30.0, 3000.0),))
+        self.assertEqual(bars[1785], ((30.0, 4970.0),))
+
+    def test_full_width_bars_are_kept(self):
+        # Ein Stab weit weg von der einspringenden Kante bleibt vollständig
+        bars = compute_contour_bars(L_SHAPE, [], 0, 100, 30, 200,
+                                    dist_margin=30)
+        positions = [bar.position for bar in bars]
+
+        self.assertIn(1030.0, positions)
+
+    def test_rectangle_is_unaffected(self):
+        with_filter = compute_contour_bars(RECT, [], 0, 250, 30, 200,
+                                           dist_margin=30)
+
+        self.assertTrue(with_filter)
+        self.assertAlmostEqual(with_filter[0].position, 30.0)
+        self.assertAlmostEqual(with_filter[-1].position, 3970.0)
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.3.2</Version>
+    <Version>0.6.0</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -108,8 +108,15 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
+            <Name>StepMeasuredAt</Name>
+            <Text>Stufe vermessen an</Text>
+            <Value>Längstes Eisen</Value>
+            <ValueList>Längstes Eisen|Kürzestes Eisen</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
             <Name>StepMaxLoss</Name>
-            <Text>Max. Verkürzung je Stab</Text>
+            <Text>Max. Längenabweichung je Stab</Text>
             <Value>250</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
@@ -120,6 +127,13 @@
             <Value>50</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>RectBoundary</Name>
+            <Text>Rechteckgrenze</Text>
+            <Value>An Konturkanten</Value>
+            <ValueList>An Konturkanten|Am Beginn der Schräge</ValueList>
+            <ValueType>StringComboBox</ValueType>
           </Parameter>
           <Parameter>
             <Name>MaxEdgeSetback</Name>
@@ -299,6 +313,13 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
+            <Name>StirrupStyle</Name>
+            <Text>Randbügel-Ausführung</Text>
+            <Value>Einzeln</Value>
+            <ValueList>Einzeln|Am Eisen angebogen</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
             <Name>SideLeft</Name>
             <Text>Links (X=0)</Text>
             <Value>Keine</Value>
@@ -361,20 +382,6 @@
             <ValueType>Length</ValueType>
           </Parameter>
           <Parameter>
-            <Name>StaggerLaps</Name>
-            <Text>Stösse versetzen</Text>
-            <Value>True</Value>
-            <ValueType>CheckBox</ValueType>
-          </Parameter>
-          <Parameter>
-            <Name>StaggerFactor</Name>
-            <Text>Versatz (x Übergreifungslänge)</Text>
-            <Value>0.3</Value>
-            <MinValue>0</MinValue>
-            <ValueType>Double</ValueType>
-            <Visible>StaggerLaps</Visible>
-          </Parameter>
-          <Parameter>
             <Name>LapOpeningMargin</Name>
             <Text>Abstand Stoss zu Öffnung</Text>
             <Value>500</Value>
@@ -387,16 +394,55 @@
   </Page>
   <Page>
     <Name>OpeningPage</Name>
-    <Text>Öffnung</Text>
+    <Text>Aussparungen</Text>
     <Parameters>
       <Parameter>
-        <Name>OpeningExpander</Name>
-        <Text>Rechteckige Öffnung</Text>
+        <Name>OpeningSourceExpander</Name>
+        <Text>Aussparungen</Text>
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>HasOpening</Name>
-            <Text>Öffnung berücksichtigen</Text>
+            <Name>AddOpeningButton</Name>
+            <Text>Aussparung zeichnen (hinzufügen)</Text>
+            <EventId>1001</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>RemoveLastOpeningButton</Name>
+            <Text>Letzte gezeichnete entfernen</Text>
+            <EventId>1002</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>ClearOpeningsButton</Name>
+            <Text>Alle gezeichneten entfernen</Text>
+            <EventId>1003</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>DetectOpenings</Name>
+            <Text>Vorhandene automatisch erkennen</Text>
+            <Value>True</Value>
+            <ValueType>CheckBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>MinOpeningSize</Name>
+            <Text>Kleinste zu berücksichtigende Aussparung</Text>
+            <Value>150</Value>
+            <MinValue>0</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>DetectOpenings</Visible>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
+        <Name>OpeningExpander</Name>
+        <Text>Rechteckige Aussparung (Zahleneingabe)</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>RectOpeningActive</Name>
+            <Text>Zusätzliche Aussparung aus Zahlen</Text>
             <Value>False</Value>
             <ValueType>CheckBox</ValueType>
           </Parameter>
@@ -406,7 +452,7 @@
             <Value>1500</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>HasOpening</Visible>
+            <Visible>RectOpeningActive</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningY</Name>
@@ -414,7 +460,7 @@
             <Value>1200</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>HasOpening</Visible>
+            <Visible>RectOpeningActive</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningWidth</Name>
@@ -422,7 +468,7 @@
             <Value>800</Value>
             <MinValue>100</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>HasOpening</Visible>
+            <Visible>RectOpeningActive</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningHeight</Name>
@@ -430,15 +476,14 @@
             <Value>1000</Value>
             <MinValue>100</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>HasOpening</Visible>
+            <Visible>RectOpeningActive</Visible>
           </Parameter>
         </Parameters>
       </Parameter>
       <Parameter>
         <Name>EdgeReinfExpander</Name>
-        <Text>Randverstärkung Öffnung</Text>
+        <Text>Randverstärkung Aussparung</Text>
         <ValueType>Expander</ValueType>
-        <Visible>HasOpening</Visible>
         <Parameters>
           <Parameter>
             <Name>EdgeReinfActive</Name>
@@ -480,6 +525,73 @@
           </Parameter>
         </Parameters>
       </Parameter>
+      <Parameter>
+        <Name>OpeningStirrupExpander</Name>
+        <Text>Randbügel Aussparung</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>OpeningStirrupStyle</Name>
+            <Text>Ausbildung</Text>
+            <Value>Einzeln</Value>
+            <ValueList>Einzeln|Am Eisen angebogen|Keine</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>OpeningStirrupSpacing</Name>
+            <Text>Bügelabstand</Text>
+            <Value>150</Value>
+            <MinValue>25</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>OpeningStirrupStyle == "Einzeln"</Visible>
+          </Parameter>
+        </Parameters>
+      </Parameter>
+      <Parameter>
+        <Name>DiagonalExpander</Name>
+        <Text>Diagonalzulagen an den Ecken</Text>
+        <ValueType>Expander</ValueType>
+        <Parameters>
+          <Parameter>
+            <Name>DiagonalActive</Name>
+            <Text>Diagonalzulagen erzeugen</Text>
+            <Value>True</Value>
+            <ValueType>CheckBox</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>DiagonalDiameter</Name>
+            <Text>Durchmesser</Text>
+            <Value>12</Value>
+            <ValueType>ReinfBarDiameter</ValueType>
+            <Visible>DiagonalActive</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>DiagonalCount</Name>
+            <Text>Stabanzahl je Ecke und Lage</Text>
+            <Value>1</Value>
+            <MinValue>1</MinValue>
+            <MaxValue>4</MaxValue>
+            <ValueType>Integer</ValueType>
+            <Visible>DiagonalActive</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>DiagonalLength</Name>
+            <Text>Stablänge</Text>
+            <Value>1500</Value>
+            <MinValue>200</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>DiagonalActive</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>DiagonalSpacing</Name>
+            <Text>Stababstand</Text>
+            <Value>100</Value>
+            <MinValue>25</MinValue>
+            <ValueType>Length</ValueType>
+            <Visible>DiagonalActive</Visible>
+          </Parameter>
+        </Parameters>
+      </Parameter>
     </Parameters>
   </Page>
   <Page>
@@ -498,10 +610,39 @@
             <ValueType>ReinfConcreteGrade</ValueType>
           </Parameter>
           <Parameter>
+            <Name>CoverMode</Name>
+            <Text>Betondeckung</Text>
+            <Value>Alle gleich</Value>
+            <ValueList>Alle gleich|Getrennt</ValueList>
+            <ValueType>StringComboBox</ValueType>
+          </Parameter>
+          <Parameter>
             <Name>ConcreteCover</Name>
-            <Text>Betondeckung (alle Lagen und Stabenden)</Text>
-            <Value>35</Value>
+            <Text>Betondeckung (alle Seiten)</Text>
+            <Value>40</Value>
             <ValueType>ReinfConcreteCover</ValueType>
+            <Visible>CoverMode == "Alle gleich"</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>CoverBottom</Name>
+            <Text>unten (UK Decke bis AK 1. Lage)</Text>
+            <Value>40</Value>
+            <ValueType>ReinfConcreteCover</ValueType>
+            <Visible>CoverMode == "Getrennt"</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>CoverTop</Name>
+            <Text>oben (OK Decke bis AK 4. Lage)</Text>
+            <Value>40</Value>
+            <ValueType>ReinfConcreteCover</ValueType>
+            <Visible>CoverMode == "Getrennt"</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>CoverSide</Name>
+            <Text>seitlich (Stabenden)</Text>
+            <Value>40</Value>
+            <ValueType>ReinfConcreteCover</ValueType>
+            <Visible>CoverMode == "Getrennt"</Visible>
           </Parameter>
           <Parameter>
             <Name>MinBarLength</Name>
@@ -533,25 +674,49 @@
           <Parameter>
             <Name>LayerBottomX</Name>
             <Text>Layer untere Lage X</Text>
-            <Value>0</Value>
+            <Value>7580</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
             <Name>LayerBottomY</Name>
             <Text>Layer untere Lage Y</Text>
-            <Value>0</Value>
+            <Value>7586</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
             <Name>LayerTopX</Name>
             <Text>Layer obere Lage X</Text>
-            <Value>0</Value>
+            <Value>7583</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
             <Name>LayerTopY</Name>
             <Text>Layer obere Lage Y</Text>
+            <Value>7582</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerOpeningEdge</Name>
+            <Text>Layer Randzulagen Aussparung</Text>
             <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerOpeningDiagonal</Name>
+            <Text>Layer Diagonalzulagen Aussparung</Text>
+            <Value>0</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerStirrupX</Name>
+            <Text>Layer Randbügel links/rechts</Text>
+            <Value>64265</Value>
+            <ValueType>Layer</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>LayerStirrupY</Name>
+            <Text>Layer Randbügel unten/oben</Text>
+            <Value>64264</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
         </Parameters>

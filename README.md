@@ -14,8 +14,11 @@ keine Kopie kommerzieller Plugins.
 | v0.2 | Rechteckige Öffnung: Kappen der Hauptstäbe, umlaufende Randverstärkung mit konfigurierbarer Übergreifungslänge | umgesetzt |
 | v0.2.1 | Randausbildung je Kante (U-Randbügel / Anschlusseisen / separate Anschlusseisen / keine), Stoßfaktor, „Alle Lagen gleich", wählbare äußere Lagenrichtung, Allplan-Layer je Lage, Handles | umgesetzt |
 | v0.3 | ScriptObject-Struktur mit drei Eingabemodi (Rechteck-Drag / Polygon zeichnen / Element wählen), Scanline-Verlegung für polygonale Konturen, mehrere Öffnungen, Randverdichtung via `calculate_length_of_regions` | umgesetzt |
-| v0.3.2 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
-| v0.4 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung, Randbügel/Anschlusseisen an Polygonkanten, Diagonalzulagen an Öffnungsecken | Roadmap |
+| v0.3.3 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
+| v0.4 | Verlegekonzept über Rechteckzerlegung (Rechtecke je Lage, Stoss an jeder Verlegungsgrenze, Abtreppung am längsten Stab), Randbügel und Anschlusseisen auch im Polygon-/Elementmodus | umgesetzt |
+| v0.5 | Aussparungs-Werkzeug: Rand-, Diagonal- und Bügelzulagen um beliebige Aussparungspolygone, Erkennung der Aussparungselemente ohne Antippen | umgesetzt |
+| v0.6 | Aussparungen werden über Palettenbuttons **hinzugefügt** statt vorab festgelegt: beliebig viele, jederzeit, einzeln wieder entfernbar | umgesetzt |
+| v0.7 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
 Original-Beispiele entwickelt und je Ausbaustufe von einem unabhängigen
@@ -39,8 +42,9 @@ PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modu
     slab_reinforcement.py                            ScriptObject (Eingabemodi) + Placement-Engine
     opening_clipping.py                              Reine Band-/Kapp-Logik Rechteckmodus (ohne Allplan, testbar)
     contour_placement.py                             Reine Scanline- und Abtreppungslogik (ohne Allplan, testbar)
+    opening_reinforcement.py                         Reine Geometrie der Aussparungsbewehrung (ohne Allplan, testbar)
     lap_splitting.py                                 Reine Stosslogik: Teilung, Versatz, Sperrzonen (ohne Allplan, testbar)
-tests/                                               65 Unit-Tests der drei Geometriemodule (laufen ohne Allplan)
+tests/                                               114 Unit-Tests der vier Geometriemodule (laufen ohne Allplan)
 tools/Update-SlabReinforcement.cmd                   Zum Anklicken: aktualisiert den lokalen Stand
 tools/Sync-SlabReinforcement.ps1                     Sync GitHub → lokales Allplan-Verzeichnis (Windows)
 ```
@@ -235,12 +239,24 @@ verifiziert.
   zulaufenden Richtung; Außenhöhe auf ganze cm abgerundet, Schenkellänge =
   Stoßlänge − ø/2), „Anschlusseisen" (Lagenstäbe stehen um die Stoßlänge
   über den Rand über), „Separate Anschlusseisen" (eigene Stäbe der Länge
-  2 × Stoßlänge, mittig auf der Kante) oder „Keine". Die Stoßlänge ist als
+  2 × Stoßlänge, mittig auf der Kante) oder „Keine". Im Polygon- und
+  Elementmodus gilt die Option **je Konturkante**: Jede Kante bekommt die
+  Einstellung der Richtung, in die ihre Aussennormale zeigt — eine schräge
+  Kante also die der überwiegenden Richtung. Die Bügelschenkel zeigen
+  immer nach innen (Rotation = Innennormale − 90°).
+  **Randbügel ignorieren schräge Plattenseiten:** An einer Schräge wird
+  kein Bügel gesetzt; stattdessen laufen die angrenzenden achsparallelen
+  Kanten bis zur Bounding Box durch, als wäre die Schräge ausgefüllt — so
+  wie es die Rechtecke aus Schritt 1 vorgeben.
+  **Randbügel-Ausführung** ist wählbar: *Einzeln* erzeugt eigene U-Bügel,
+  *Am Eisen angebogen* verzichtet darauf und biegt stattdessen die Stäbe
+  der 1. und 2. Lage an dieser Kante ab (Hakenlänge = Achsmass des
+  Bügels). Lage und Verlegung der Bewehrungslagen ändern sich dadurch
+  nicht. Die Stoßlänge ist als
   Stoßfaktor (Vielfaches von ø) konfigurierbar — bewusst kein Normwert.
   Randbügel und separate Anschlusseisen sparen den Bereich einer Öffnung
   aus, wenn diese den jeweiligen Randstreifen schneidet. Bekannte
-  Einschränkungen: Randbügel/Anschlusseisen gibt es nur im Rechteckmodus
-  (an freien Polygonkanten: Roadmap v0.4); bei aktiver Öffnung starten die
+  Einschränkungen: bei aktiver Öffnung starten die
   Hauptlagen-Bänder ihr Raster je Band neu, sodass Randbügel/Anschluss-
   eisen dort nicht zwingend mit den Lagenstäben fluchten; die Format-
   Eigenschaften (Stift/Farbe) wirken auf den Plattenkörper, die Bewehrung
@@ -260,17 +276,25 @@ verifiziert.
 Bei jeder Parameteränderung ruft Allplan `create_element` neu auf —
 das ist die übliche Live-Vorschau von Standard-PythonParts.
 
-### Höhenlagen-Konvention
+### Betondeckung und Höhenlagen
 
-Die Höhenlage jedes Stabes steckt in der z-Koordinate der Verlegepunkte
-(Stabachse); die Quer-Betondeckung des Shapes ist 0. Dieses Modell stammt
-aus deinem Deckenplatte-PythonPart und ergibt mit einer einzigen
-Betondeckung `c` (äussere Richtung = die unter „Verlegung" gewählte):
+Die Betondeckung ist wahlweise **ein Wert für alles** („Alle gleich") oder
+**getrennt** einstellbar:
 
-- unten aussen: `c + ø/2`
-- unten innen:  `c + ø_aussen + ø/2`
-- oben aussen:  `Dicke − c − ø/2`
-- oben innen:   `Dicke − c − ø_aussen − ø/2`
+- **unten** `c_u` — Abstand Unterkante Decke bis **Aussenkante der 1. Lage**;
+  die Höhe der 2. Lage folgt daraus.
+- **oben** `c_o` — Abstand Oberkante Decke bis **Aussenkante der 4. Lage**;
+  die Höhe der 3. Lage folgt daraus.
+- **seitlich** `c_s` — gilt für die Stabenden und die Verlegeränder.
+
+Die Höhenlage steckt in der z-Koordinate der Verlegepunkte (Stabachse),
+die Quer-Betondeckung des Shapes ist 0 — Modell aus dem
+Deckenplatte-PythonPart. Mit der äusseren Richtung aus „Verlegung":
+
+- 1. Lage (unten aussen): `c_u + ø/2`
+- 2. Lage (unten innen):  `c_u + ø_1 + ø/2`
+- 4. Lage (oben aussen):  `Dicke − c_o − ø/2`
+- 3. Lage (oben innen):   `Dicke − c_o − ø_4 − ø/2`
 
 Randverstärkungs-Zulagen liegen als eigene Ebenen innerhalb der Hauptlagen
 (unten oberhalb der inneren unteren Lage, oben unterhalb der inneren oberen
@@ -286,6 +310,29 @@ unten stammen aus dem **Vernehmlassungsentwurf prSIA 262:2024-04** (das
 Dokument trägt den Vermerk „keine Gültigkeit") und aus der **Richtlinie zur
 Betonstahlverarbeitung, 1. Auflage 2025 (SSHV/SIA)**. Vor produktivem
 Einsatz an der gekauften Endfassung gegenprüfen.
+
+### 0. Verlegekonzept in drei Schritten
+
+Die Verlegung entsteht nicht Stab für Stab, sondern über Bereiche:
+
+1. **Rechtecke bilden.** Die Kontur wird in achsparallele Rechtecke
+   zerlegt. Getrennt wird dort, wo die Kontur eine Kante **parallel zur
+   Stabrichtung** hat — deshalb sind die Rechtecke je Lage anders
+   ausgerichtet (X-Lage bricht an waagrechten, Y-Lage an senkrechten
+   Kanten). Ein schräger Rand lässt den allen Stäben gemeinsamen Teil als
+   Rechteck stehen; der veränderliche Rest wird zur Abtreppungszone. Über
+   den Palettenwert **Rechteckgrenze** ist wählbar, ob das Rechteck an der
+   nächsten Konturkante endet (Rechtecke fluchten über die Bänder hinweg)
+   oder erst am Beginn der Schräge.
+2. **Stosslage.** Wo zwei Verlegungen längs aneinanderstossen — typisch
+   Rechteck und angrenzende Abtreppung — überlappen sie sich um die
+   Übergreifungslänge, unabhängig von der Stablänge. Verlängert wird die
+   Abtreppungszone in das Rechteck hinein, sodass die Rechteckgrenze die
+   Stosslage definiert.
+3. **Verlegungen.** Je Zone eine Verlegung. Ist ein Stab danach immer noch
+   länger als die zulässige Stablänge, wird er zusätzlich gestossen.
+   Verlegungen mit nur einem Stab entstehen nicht: Ein einzelner Stab wird
+   der Nachbarverlegung zugeschlagen, die dafür verlängert wird.
 
 ### 1. Stösse — wann
 
@@ -307,20 +354,16 @@ ausdrücklich verlangt („In der Regel gilt es, die Anzahl Positionen zu
 minimieren", Ziff. 4.1.1) und wofür je Position ein fixer Betrag
 verrechnet wird (Ziff. 7.1).
 
-### 3. Stösse — wo, und der Versatz
+### 3. Stösse — wo
 
-**Normativ (prSIA 262, Ziff. 5.2.6.6):** Bei Zugstäben muss für
-1.2 σ_sd statt 1.0 σ_sd bemessen werden — **ausser** wenn bei **Platten
-höchstens die Hälfte der Stäbe** gestossen ist **und** der Abstand
-zwischen verschiedenen Übergreifungsstössen **mindestens 0.3 · l_sd**
-beträgt. Genau das setzt das Tool um:
-
-- Ein Verlegelauf wird in **gerade und ungerade Stäbe** aufgeteilt (zwei
-  Placements mit doppeltem Stababstand). Damit ist in jedem Schnitt
-  höchstens die Hälfte der Stäbe gestossen.
-- Beide Gruppen erhalten gegenläufig verschobene Stosslagen; der
-  Längsversatz ist **`StaggerFactor` × Übergreifungslänge**, Default
-  **0.3** entsprechend der Norm.
+**Kein automatischer Stossversatz.** SIA 262 Ziff. 5.2.6.6 verlangt für
+Platten, dass höchstens die Hälfte der Stäbe im selben Schnitt gestossen
+ist und benachbarte Stösse mindestens 0.3 · l_sd auseinanderliegen. Das
+Tool setzt das **nicht** automatisch um: Ein automatischer Versatz müsste
+jeden Verlegelauf in gerade und ungerade Stäbe aufteilen, was zwei
+ineinandergeschobene Verlegungen je Bereich ergibt — auf Wunsch des
+Anwenders bewusst entfernt. **Der Versatz ist damit eine Prüfaufgabe der
+Tragwerksplanung.**
 
 **Ebenfalls normativ (Ziff. 5.2.6.3):** *„Stossverbindungen sind nach
 Möglichkeit in Zonen geringer Beanspruchung anzuordnen."* Da du Wände und
@@ -359,16 +402,28 @@ prSIA 262 und in der Verarbeitungsrichtlinie). Das Tool verwendet daher
 eine klar definierte, konfigurierbare **Bürostandard-Regel**:
 
 > Aufeinanderfolgende Stäbe bilden eine Stufe, solange **kein Stab der
-> Stufe dadurch mehr als `StepMaxLoss` kürzer wird**, als er geometrisch
-> sein könnte (Default 250 mm). Alle Stäbe einer Stufe erhalten dieselbe
-> Länge: Anfang = grösster Anfang, Ende = kleinstes Ende der Stufe.
+> Stufe dadurch mehr als `StepMaxLoss` von seiner geometrischen Länge
+> abweicht** (Default 250 mm). Alle Stäbe einer Stufe erhalten dieselbe
+> Länge.
 
-Daraus folgt unmittelbar:
+Woran diese Länge gemessen wird, ist eine Entscheidung mit einem
+unvermeidlichen Zielkonflikt — deshalb die Palettenoption
+**`StepMeasuredAt`**:
 
-- Kein Stab ragt je über die Betonkante hinaus (es wird immer das
-  ungünstigste Ende der Stufe verwendet, und das Längenraster
-  `StepLengthRaster`, Default 50 mm, rundet **nach innen**).
-- Die unbewehrte Zone an der Schräge ist durch `StepMaxLoss` begrenzt.
+| Einstellung | Länge der Stufe | Folge |
+| --- | --- | --- |
+| **Kürzestes Eisen** | Schnittmenge aller Stäbe | Kein Stab verlässt den Beton, die seitliche Deckung ist überall eingehalten. Die längeren Stäbe verlieren bis zu `StepMaxLoss` an Verankerungslänge. |
+| **Längstes Eisen** (Default) | Hülle aller Stäbe | Die Stufe folgt der Schräge so eng wie möglich. Die kürzeren Stäbe ragen dafür um bis zu `StepMaxLoss` über ihre eigene Länge hinaus — also **in die seitliche Deckung hinein und darüber hinaus**. |
+
+Beides zugleich geht nicht: eine Verlegung hat genau eine Stablänge. Wer
+die Stufe am längsten Stab vermisst, akzeptiert damit, dass die kürzeren
+Stäbe über die Betonkante hinauslaufen; `StepMaxLoss` begrenzt, wie weit.
+
+Daraus folgt weiter:
+
+- Das Längenraster `StepLengthRaster` (Default 50 mm) rundet **nach
+  innen**. Ein Stab darf nie über den Referenzstab hinauswachsen, sonst
+  wäre die seitliche Deckung schon durch die Rundung verletzt.
 - Ein grösserer Wert ergibt weniger, dafür gröbere Stufen — bei 45° und
   15 cm Stababstand liefert der Default 2 Stäbe je Stufe und 30 cm
   Längensprung.
@@ -376,12 +431,112 @@ Daraus folgt unmittelbar:
   einer Öffnung) oder der Stababstand wechselt. Rechtwinklige Bereiche
   bleiben ein einziges Placement.
 
+## Aussparungen
+
+Aussparungen sind **keine Voreinstellung**, die vor der Eingabe
+feststeht, sondern werden nach und nach hinzugefügt. Auf der
+Palettenseite *Aussparungen*:
+
+| Bedienelement | Wirkung |
+| --- | --- |
+| **Aussparung zeichnen (hinzufügen)** | Startet jederzeit eine weitere Eingaberunde. Beliebig viele Polygone zeichnen, ESC beendet die Runde; das Ergebnis wird an die Liste **angehängt**. Beliebig oft wiederholbar, in allen drei Eingabemodi. Die bereits erzeugte Bewehrung bleibt während des Zeichnens sichtbar. |
+| **Letzte gezeichnete entfernen** | Nimmt die zuletzt hinzugefügte Aussparung wieder heraus. |
+| **Alle gezeichneten entfernen** | Leert die Liste der gezeichneten Aussparungen; die automatisch erkannten bleiben. |
+| **Vorhandene automatisch erkennen** | Innenkonturen der Eingabe und Aussparungselemente der gewählten Decke. Jederzeit ein-/ausschaltbar, ohne die Eingabe zu wiederholen. |
+| *Rechteckige Aussparung (Zahleneingabe)* | Optional zusätzlich eine Aussparung über X/Y/Breite/Länge. |
+
+Technisch sind das Palettenbuttons (`<ValueType>Button</ValueType>` mit
+`<EventId>`), die im Skript in `on_control_event(event_id) -> bool`
+landen — der Rückgabewert baut die Palette neu auf
+([Button-Parameter](https://pythonparts.allplan.com/2024/manual/key_components/palette/parameters/parameter_with_button/)).
+Erkannte und gezeichnete Aussparungen werden getrennt gehalten: die
+erkannten ermittelt jede Neueingabe neu, die gezeichneten sammeln sich an.
+
+`MinOpeningSize` (Default 150 mm) filtert automatisch erkannte
+Innenkonturen: alles, dessen kleinere Seite darunter liegt, ist in der
+Praxis ein Zeichnungsartefakt (doppelte Punkte, Rundungen) und keine
+Aussparung.
+
+Eine polygonale Aussparung im Rechteckmodus schaltet die Platte intern auf
+den Konturpfad um — die Bandlogik des Rechteckmodus kennt nur
+achsparallele Rechtecke, der Scanline-Pfad beliebige Polygone.
+
+**Aussparungen als eigene Elemente:** In Allplan ist eine Aussparung in
+einer Decke kein Teil von deren Konturpolygon, sondern ein **Kindelement**.
+Im Elementmodus liest das Tool sie deshalb zusätzlich über
+`BaseElementAdapterChildElementsService.GetChildModelElements`
+([2026-API-Referenz](https://pythonparts.allplan.com/2026/api_reference/InterfaceStubs/NemAll_Python_IFW_ElementAdapter/BaseElementAdapterChildElementsService/))
+— die Aussparungen müssen also **nicht einzeln angetippt** werden.
+Gefiltert wird bewusst **nicht** über eine Typ-UUID: welche Konstante die
+Aussparung bezeichnet, liess sich in der Dokumentation **nicht belegen**.
+Statt zu raten, wird jedes Kindelement genommen, aus dem sich eine
+geschlossene Kontur lesen lässt, die vollständig innerhalb der
+Plattenkontur liegt und kleiner ist als diese.
+
+### Bewehrung um die Aussparung
+
+Beides läuft über `opening_reinforcement.py` und funktioniert für
+**beliebige, auch schiefe** Aussparungspolygone:
+
+- **Randzulagen:** je Aussparungskante eine Schar Stäbe **parallel zu
+  dieser Kante**, erste Achse einen Stabdurchmesser von der Kante entfernt,
+  weitere im eingestellten Abstand nach aussen. Jeder Stab ragt um die
+  Übergreifungslänge über beide Ecken hinaus.
+- **Diagonalzulagen:** je Ecke Stäbe senkrecht zur Winkelhalbierenden, die
+  die Ecke überspannen — gegen den 45°-Riss, der von jeder einspringenden
+  Ecke ausgeht. Nur an echten Knicken (> 20°), ein Zwischenpunkt auf einer
+  geraden Kante erzeugt keine Diagonale.
+
+Jeder Zulagestab wird anschliessend an der Plattenkontur **und an allen
+anderen Aussparungen** abgeschnitten, mit derselben Deckungsregel wie die
+Hauptlagen (senkrecht zur geschnittenen Kante, an Schrägen `c / sin α`).
+Reststücke unter der Mindeststablänge entfallen.
+
+- **Randbügel** (`OpeningStirrupStyle`), wie am Plattenrand mit derselben
+  Auswahl:
+  - *Einzeln* — separate offene U-Bügel entlang jeder Aussparungskante, im
+    eingestellten Abstand, Schenkel von der Öffnung weg in den Beton
+  - *Am Eisen angebogen* — kein eigener Bügel; stattdessen bekommen die
+    Lagenstäbe, die an der Aussparung enden, den vollen U-Bügel angebogen
+    (dieselbe Freiform wie am Plattenrand)
+  - *Keine*
+
+Plattenrand und Aussparungsrand haben dafür **getrennte** Optionen
+(`StirrupStyle` bzw. `OpeningStirrupStyle`) — am Rand einzeln und an der
+Aussparung angebogen (oder umgekehrt) ist damit möglich.
+
+Randzulagen und Diagonalzulagen haben einen eigenen Allplan-Layer
+(`LayerOpeningEdge`, `LayerOpeningDiagonal`, 0 = aktueller Layer, auf der
+Seite *Allgemein*). Die **Randbügel der Aussparung** dagegen erben den
+Layer der Lage, deren Stäbe senkrecht auf die jeweilige Kante zulaufen —
+dieselbe Lage, aus der auch Ø, Abstand und Stahlgüte des Bügels stammen.
+Eine eigene Einstellung dafür gibt es bewusst nicht.
+
+Die Höhenlage: Zulagen liegen **innerhalb** der Hauptlagen — unten
+oberhalb der inneren unteren Lage, oben unterhalb der inneren oberen Lage.
+Kanten mit geradem Index liegen in der einen, Kanten mit ungeradem Index
+in der nächsten Ebene darüber (bei einer rechteckigen Aussparung genau die
+beiden Hauptrichtungen), die Diagonalen in einer dritten. So durchdringen
+sich weder Zulagen untereinander noch Zulagen und Hauptlagen. Ist zwischen
+den Hauptlagen kein Platz mehr, entfällt die Ebene mit einer Meldung im
+Trace-Fenster statt zu kollidieren.
+
 **Betondeckung an der Schräge:** Die Deckung wird **senkrecht zur Kante**
 eingehalten. Bei einem Winkel α zwischen Stabachse und Kante ist der
 Rückversatz in Stabrichtung `c / sin α` — bei 45° also das 1.41-fache der
 Deckung. Für spitze Winkel begrenzt `MaxEdgeSetback` (Default 150 mm) den
 Rückversatz, damit Stäbe in spitzen Ecken nicht unbrauchbar kurz werden.
 Öffnungsränder erhalten dieselbe Behandlung.
+
+**Kanten parallel zur Stabrichtung:** Auch dort gilt die Deckung. Für die
+äusseren Ränder erledigt das der Randabstand der Stabachsen
+(`Deckung + ø/2`). Bei einspringenden Kanten (L-Form, Vorsprünge) liegt
+eine solche Kante mitten im Scanraster — ein Stab, der in deren
+Deckungsstreifen fiele, wird auf der Ausdehnung dieser Kante
+**abgeschnitten** (nicht ganz verworfen), damit der übrige Plattenbereich
+bewehrt bleibt. Öffnungen sind davon ausgenommen: ein durchgehender Stab
+soll nicht wegen einer kleinen Aussparung entfallen, dort greift die
+Öffnungsrandbewehrung.
 
 ### 6. Öffnungen — Zulagen
 
@@ -393,7 +548,28 @@ sind daher **konfigurierbarer Bürostandard, nicht normbelegt**. Verbreitete
 Praxis: mindestens die gekappte Querschnittsfläche je Richtung zulegen und
 die Zulagen um mindestens die Verankerungslänge über die Öffnungsecke
 hinausführen; zusätzlich Diagonalstäbe an den Ecken gegen die 45°-Risse.
-Diagonalzulagen erzeugt das Tool derzeit **nicht** (Roadmap v0.4).
+Beides erzeugt das Tool, beides ist über die Palette einstellbar.
+
+### Bürovorgaben als Defaults
+
+Aus deiner Palette übernommen: **Betondeckung 40 mm**, Mindeststablänge
+300 mm, „Als PythonPart erzeugen" aktiv, und die Bewehrungslayer nach
+eurem Standard — die IDs stammen aus deiner Deckenplatte-`.pyp`, die
+Bezeichnungen decken sich:
+
+| Parameter | Layer | ID |
+|---|---|---|
+| untere Lage X | RU_P_UNT_1 (Unten 1. Lage) | 7580 |
+| untere Lage Y | RU_P_UNT_2 (Unten 2. Lage) | 7586 |
+| obere Lage X | RU_P_OBE_4 (Oben 4. Lage) | 7583 |
+| obere Lage Y | RU_P_OBE_3 (Oben 3. Lage) | 7582 |
+| Randbügel links/rechts | RU_P_UNT_1_BGL | 64265 |
+| Randbügel unten/oben | RU_P_UNT_2_BGL | 64264 |
+
+Die **Betongüte** bleibt bewusst auf `-1` — das heisst „aus den
+Allplan-Projekteinstellungen übernehmen" und ergibt in deinem Projekt
+bereits C25/30. Ein fester Index wäre ohne laufendes Allplan nicht
+verlässlich zu bestimmen und würde die Projekteinstellung überstimmen.
 
 ### 7. Betondeckung — Nennwerte
 

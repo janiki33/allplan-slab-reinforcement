@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScripts' / 'SlabReinforcement'))
 
 from lap_splitting import (clamp_joint_shift, joint_positions, required_piece_count,
-                           split_bar_with_laps, split_with_preferred_joints, stagger_shift)
+                           split_bar_with_laps, split_with_preferred_joints)
 
 
 class RequiredPieceCountTest(unittest.TestCase):
@@ -81,17 +81,6 @@ class SplitBarWithLapsTest(unittest.TestCase):
     def test_empty_segment(self):
         self.assertEqual(split_bar_with_laps((100, 100), 8000, 600), [])
 
-
-class StaggerTest(unittest.TestCase):
-
-    def test_neighbouring_bars_are_offset_by_the_full_amount(self):
-        even = stagger_shift(0, 1000)
-        odd = stagger_shift(1, 1000)
-
-        self.assertAlmostEqual(odd - even, 1000, places=6)
-
-    def test_every_second_bar_matches_again(self):
-        self.assertEqual(stagger_shift(0, 1000), stagger_shift(2, 1000))
 
 
 class ForbiddenZoneTest(unittest.TestCase):

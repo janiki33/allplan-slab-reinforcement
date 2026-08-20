@@ -27,6 +27,7 @@ Alle Längenangaben in mm (Allplan-Standardeinheit).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +54,7 @@ from StdReinfShapeBuilder.RotationAngles import RotationAngles
 from TypeCollections.HandleList import HandleList
 from TypeCollections.ModelEleList import ModelEleList
 from Utils.HandleCreator import HandleCreator
+from Utils.RotationUtil import RotationUtil
 
 def _load_helper_modules():
     """Lädt die drei Nachbarmodule aus demselben Ordner.
@@ -69,11 +71,13 @@ def _load_helper_modules():
     damit sie im Trace-Fenster sichtbar wird.
     """
 
-    names = ('contour_placement', 'lap_splitting', 'opening_clipping')
+    names = ('contour_placement', 'lap_splitting', 'opening_clipping',
+             'opening_reinforcement')
 
     try:
-        from . import contour_placement, lap_splitting, opening_clipping   # noqa: F401
-        return contour_placement, lap_splitting, opening_clipping
+        from . import (contour_placement, lap_splitting,        # noqa: F401
+                       opening_clipping, opening_reinforcement)
+        return contour_placement, lap_splitting, opening_clipping, opening_reinforcement
     except Exception as relative_error:                # noqa: BLE001
         first_error = relative_error
 
@@ -120,20 +124,30 @@ def _load_helper_modules():
     return tuple(modules)
 
 
-_contour_placement, _lap_splitting, _opening_clipping = _load_helper_modules()
+_contour_placement, _lap_splitting, _opening_clipping, _opening_reinforcement = \
+    _load_helper_modules()
 
 compute_contour_bars = _contour_placement.compute_contour_bars
-group_bars_into_steps = _contour_placement.group_bars_into_steps
+decompose_into_zones = _contour_placement.decompose_into_zones
+apply_boundary_laps = _contour_placement.apply_boundary_laps
 loop_area = _contour_placement.loop_area
 loop_bbox = _contour_placement.loop_bbox
 split_closed_loops = _contour_placement.split_closed_loops
+LONGEST = _contour_placement.LONGEST
+SHORTEST = _contour_placement.SHORTEST
 
 split_with_preferred_joints = _lap_splitting.split_with_preferred_joints
-stagger_shift = _lap_splitting.stagger_shift
 
 compute_edge_bar_runs = _opening_clipping.compute_edge_bar_runs
 compute_edge_strip_segments = _opening_clipping.compute_edge_strip_segments
 compute_placement_bands = _opening_clipping.compute_placement_bands
+
+opening_edge_bars = _opening_reinforcement.opening_edge_bars
+corner_diagonals = _opening_reinforcement.corner_diagonals
+clip_bar = _opening_reinforcement.clip_bar
+group_equal_bars = _opening_reinforcement.group_equal_bars
+outward_normals = _opening_reinforcement.outward_normals
+point_in_loop = _opening_reinforcement.point_in_loop
 
 if TYPE_CHECKING:
     from __BuildingElementStubFiles.SlabReinforcementBuildingElement import \
@@ -141,7 +155,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.3.3'
+SCRIPT_VERSION = '0.6.0'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -157,6 +171,14 @@ SIDE_NONE = 'Keine'
 INPUT_RECT = 'Rechteck (Drag)'
 INPUT_POLYGON = 'Polygon zeichnen'
 INPUT_ELEMENT = 'Element wählen'
+
+# Palettenbuttons der Aussparungsseite (EventId in der .pyp)
+EVENT_ADD_OPENING = 1001
+EVENT_REMOVE_LAST_OPENING = 1002
+EVENT_CLEAR_OPENINGS = 1003
+
+# Eingabestadium "Aussparung zeichnen"
+OPENING_STAGE = 1
 
 
 def check_allplan_version(_build_ele: BuildingElement,
@@ -206,11 +228,20 @@ class SlabReinforcementScript(BaseScriptObject):
 
         self.point_result = PointInteractorResult()
         self.polygon_result = PolygonInteractorResult()
+        self.opening_result = PolygonInteractorResult()
         self.sel_result = SingleElementSelectResult()
+
+        # 0 = Kontur/Absetzpunkt, OPENING_STAGE = Aussparungen zeichnen
+        self.input_stage = 0
 
         self.placement_pnt = AllplanGeo.Point3D()
         self.contour: list[tuple[float, float]] | None = None
-        self.openings: list[list[tuple[float, float]]] = []
+
+        # Aussparungen aus zwei Quellen, getrennt gehalten: die automatisch
+        # erkannten werden bei jeder Neueingabe neu ermittelt, die
+        # gezeichneten sammeln sich über den Button an
+        self.detected_openings: list[list[tuple[float, float]]] = []
+        self.drawn_openings: list[list[tuple[float, float]]] = []
         self.z_offset = 0.0
         self.thickness_override: float | None = None
 
@@ -228,8 +259,10 @@ class SlabReinforcementScript(BaseScriptObject):
 
         # Ergebnisse einer vorherigen Eingabe verwerfen (Moduswechsel)
         self.input_finished = False
+        self.input_stage = 0
         self.contour = None
-        self.openings = []
+        self.detected_openings = []
+        self.drawn_openings = []
         self.z_offset = 0.0
         self.thickness_override = None
         self.placement_pnt = AllplanGeo.Point3D()
@@ -267,6 +300,11 @@ class SlabReinforcementScript(BaseScriptObject):
         if build_ele.InputMode.value != build_ele.INPUT_MODE_INPUT:
             return
 
+        if self.input_stage == OPENING_STAGE:
+            self._process_drawn_openings()
+            self._finish_input()
+            return
+
         input_method = build_ele.InputMethod.value
 
         if input_method == INPUT_ELEMENT:
@@ -276,14 +314,113 @@ class SlabReinforcementScript(BaseScriptObject):
         else:
             self.placement_pnt = self.point_result.input_point
 
-        build_ele.InputMode.value = build_ele.INPUT_MODE_CREATION
+        self._finish_input()
 
+
+    @property
+    def openings(self) -> list[list[tuple[float, float]]]:
+        """Alle Aussparungen: automatisch erkannte plus gezeichnete."""
+
+        detected = self.detected_openings \
+            if self.build_ele.DetectOpenings.value else []
+
+        return list(detected) + list(self.drawn_openings)
+
+
+    def _finish_input(self):
+        """Eingabe abschliessen und in den Erzeugungsmodus wechseln."""
+
+        self.build_ele.InputMode.value = self.build_ele.INPUT_MODE_CREATION
+
+        self.input_stage = 0
         self.script_object_interactor = None
         self.input_finished = True
 
         print(f'SlabReinforcement: Eingabe abgeschlossen — '
               f'Kontur: {"ja" if self.contour else "nein (Rechteck)"}, '
-              f'Öffnungen: {len(self.openings)}')
+              f'Aussparungen: {len(self.openings)} '
+              f'({len(self.detected_openings)} erkannt, '
+              f'{len(self.drawn_openings)} gezeichnet)')
+
+
+    def on_control_event(self, event_id: int) -> bool:
+        """Palettenbuttons der Aussparungsseite.
+
+        Aussparungen sind keine Voreinstellung, sondern werden nach und
+        nach hinzugefügt: "Aussparung zeichnen" startet jederzeit eine
+        weitere Eingaberunde und hängt das Ergebnis an die Liste an. Die
+        bereits erzeugte Bewehrung bleibt währenddessen sichtbar.
+
+        Rückgabe True = Palette neu aufbauen (Vertrag ab 2025).
+        """
+
+        if event_id == EVENT_ADD_OPENING:
+            self._start_opening_input()
+            return True
+
+        if event_id == EVENT_REMOVE_LAST_OPENING:
+            if self.drawn_openings:
+                self.drawn_openings.pop()
+                print(f'SlabReinforcement: letzte gezeichnete Aussparung '
+                      f'entfernt ({len(self.drawn_openings)} verbleiben)')
+            else:
+                print('SlabReinforcement: keine gezeichnete Aussparung vorhanden')
+
+            return True
+
+        if event_id == EVENT_CLEAR_OPENINGS:
+            print(f'SlabReinforcement: {len(self.drawn_openings)} gezeichnete '
+                  f'Aussparung(en) entfernt')
+            self.drawn_openings = []
+
+            return True
+
+        return False
+
+
+    def _start_opening_input(self):
+        """Weitere Eingaberunde: beliebig viele Aussparungspolygone
+        zeichnen, ESC beendet die Runde.
+        """
+
+        if not self.input_finished:
+            print('SlabReinforcement: zuerst die Plattenkontur eingeben')
+            return
+
+        self.input_stage = OPENING_STAGE
+        self.opening_result = PolygonInteractorResult()
+
+        # InputMode zurück auf INPUT, damit start_next_input das Ergebnis
+        # abholt; input_finished bleibt True, damit die bereits erzeugte
+        # Bewehrung während des Zeichnens sichtbar bleibt
+        self.build_ele.InputMode.value = self.build_ele.INPUT_MODE_INPUT
+
+        self.script_object_interactor = PolygonInteractor(
+            self.opening_result,
+            z_coord_input=False,
+            multi_polygon_input=True)
+
+        self.script_object_interactor.start_input(self.coord_input)
+
+        print('SlabReinforcement: Aussparung(en) zeichnen — ESC beendet die Eingabe')
+
+
+    def _process_drawn_openings(self):
+        """Die gezeichneten Polygone an die Aussparungsliste anhängen."""
+
+        loops = self._loops_from_polygon_result(self.opening_result)
+
+        # Im Rechteckmodus liegt die Platte im lokalen System des
+        # Absetzpunkts — die gezeichneten Polygone kommen global herein
+        if self.build_ele.InputMethod.value == INPUT_RECT:
+            origin = self.placement_pnt
+            loops = [[(x - origin.X, y - origin.Y) for x, y in loop]
+                     for loop in loops]
+
+        self.drawn_openings += loops
+
+        print(f'SlabReinforcement: {len(loops)} Aussparung(en) hinzugefügt '
+              f'({len(self.drawn_openings)} gezeichnete insgesamt)')
 
 
     def execute(self) -> CreateElementResult:
@@ -363,24 +500,33 @@ class SlabReinforcementScript(BaseScriptObject):
         return False
 
 
-    def _process_drawn_polygons(self):
-        """Gezeichnete Polygone übernehmen: größte Fläche = Kontur,
-        alle weiteren Loops = Öffnungen.
-        """
+    def _loops_from_polygon_result(self, result) -> list[list[tuple[float, float]]]:
+        """Geschlossene Loops aus einem PolygonInteractor-Ergebnis."""
 
-        input_polygon = self.polygon_result.input_polygon
+        input_polygon = result.input_polygon
 
         polygons = input_polygon if isinstance(input_polygon, list) else [input_polygon]
 
         points: list[tuple[float, float]] = []
 
         for polygon in polygons:
+            if polygon is None:
+                continue
+
             converted = AllplanGeo.ConvertTo2D(polygon)
             polygon_2d = converted[1] if isinstance(converted, tuple) else converted
 
             points += [(p.X, p.Y) for p in polygon_2d.Points]
 
-        self._set_contour_from_loops(split_closed_loops(points))
+        return split_closed_loops(points)
+
+
+    def _process_drawn_polygons(self):
+        """Gezeichnete Polygone übernehmen: größte Fläche = Kontur,
+        alle weiteren Loops = Aussparungen.
+        """
+
+        self._set_contour_from_loops(self._loops_from_polygon_result(self.polygon_result))
 
 
     def _process_selected_element(self):
@@ -405,6 +551,11 @@ class SlabReinforcementScript(BaseScriptObject):
             points = [(p.X, p.Y) for p in geometry.Points]
             self._set_contour_from_loops(split_closed_loops(points))
 
+            # Aussparungen sind in Allplan eigene Kindelemente der Decke —
+            # sie stecken nicht in deren Konturpolygon und müssen deshalb
+            # zusätzlich gelesen werden. Ohne sie anzutippen.
+            self.detected_openings += self._child_openings(sel_element)
+
         else:
             print('SlabReinforcement: Geometrie des gewählten Elements wird '
                   'nicht unterstützt — Rechteck aus der Palette wird verwendet')
@@ -422,7 +573,120 @@ class SlabReinforcementScript(BaseScriptObject):
         loops = sorted(loops, key=lambda loop: abs(loop_area(loop)), reverse=True)
 
         self.contour = loops[0]
-        self.openings = loops[1:]
+        self.detected_openings = self._filter_openings(loops[1:])
+
+
+    def _child_openings(self, sel_element) -> list[list[tuple[float, float]]]:
+        """Aussparungen der gewählten Decke aus deren Kindelementen lesen.
+
+        In Allplan ist eine Aussparung ein eigenes Element unterhalb der
+        Decke, nicht Teil ihres Konturpolygons. Über
+        `BaseElementAdapterChildElementsService.GetChildModelElements`
+        (2026-API-Referenz) sind sie erreichbar, ohne dass der Anwender sie
+        einzeln antippen muss.
+
+        Gefiltert wird **nicht** über eine Typ-UUID: welche Konstante die
+        Aussparung bezeichnet, liess sich in der Doku nicht belegen. Statt
+        zu raten, wird jedes Kindelement genommen, aus dem sich eine
+        geschlossene Kontur lesen lässt, die vollständig innerhalb der
+        Plattenkontur liegt und kleiner ist als diese — das trifft auf
+        Aussparungen zu und auf sonst kaum ein Kindelement.
+        """
+
+        if not self.build_ele.DetectOpenings.value or self.contour is None:
+            return []
+
+        service = getattr(AllplanEleAdapter,
+                          'BaseElementAdapterChildElementsService', None)
+
+        if service is None or not hasattr(service, 'GetChildModelElements'):
+            print('SlabReinforcement: BaseElementAdapterChildElementsService '
+                  'nicht verfügbar — Aussparungselemente werden nicht gelesen')
+            return []
+
+        try:
+            children = service.GetChildModelElements(sel_element)
+        except Exception as error:                     # noqa: BLE001
+            print(f'SlabReinforcement: Kindelemente nicht lesbar ({error})')
+            return []
+
+        loops: list[list[tuple[float, float]]] = []
+
+        for child in children:
+            loops += self._loops_from_element(child)
+
+        inside = [loop for loop in loops if self._loop_is_inside_contour(loop)]
+
+        print(f'SlabReinforcement: {len(inside)} Aussparungselement(e) erkannt')
+
+        return self._filter_openings(inside)
+
+
+    def _loops_from_element(self, element) -> list[list[tuple[float, float]]]:
+        """Geschlossene Grundriss-Loops eines Elements, so defensiv wie
+        möglich: Polygon-/Polylinien-Geometrie über `Points`, Körper über
+        ihre Eckpunkte (konvexe Hülle wäre falsch, deshalb nur `Points`).
+        """
+
+        try:
+            geometry = AllplanBaseEle.GetElement(element).GetGeometryObject()
+        except Exception:                              # noqa: BLE001
+            return []
+
+        if geometry is None or not hasattr(geometry, 'Points'):
+            return []
+
+        try:
+            points = [(p.X, p.Y) for p in geometry.Points]
+        except Exception:                              # noqa: BLE001
+            return []
+
+        return [loop for loop in split_closed_loops(points) if len(loop) >= 3]
+
+
+    def _loop_is_inside_contour(self, loop: list[tuple[float, float]]) -> bool:
+        """Liegt der Loop vollständig in der Plattenkontur und ist er
+        kleiner als sie? (Die Kontur selbst darf nicht als Aussparung
+        durchgehen.)
+        """
+
+        if abs(loop_area(loop)) >= abs(loop_area(self.contour)) * 0.999:
+            return False
+
+        return all(point_in_loop(point, self.contour) for point in loop)
+
+
+    def _filter_openings(self,
+                         loops: list[list[tuple[float, float]]]
+                         ) -> list[list[tuple[float, float]]]:
+        """Automatisch erkannte Innenkonturen als Aussparungen übernehmen.
+
+        Nur wenn die Palette das vorsieht, und nur ab der eingestellten
+        Mindestgrösse — winzige Innenkonturen sind meist Zeichnungsartefakte
+        (Rundungen, doppelte Punkte) und keine echten Aussparungen.
+        """
+
+        if not self.build_ele.DetectOpenings.value:
+            return []
+
+        minimum = self.build_ele.MinOpeningSize.value
+
+        kept = []
+
+        for loop in loops:
+            xs = [p[0] for p in loop]
+            ys = [p[1] for p in loop]
+
+            if min(max(xs) - min(xs), max(ys) - min(ys)) < minimum:
+                continue
+
+            kept.append(loop)
+
+        if len(kept) < len(loops):
+            print(f'SlabReinforcement: {len(loops) - len(kept)} Innenkontur(en) '
+                  f'kleiner als {minimum} mm ignoriert')
+
+        return kept
 
 
     def _set_contour_from_axis(self, element, axis):
@@ -459,7 +723,7 @@ class SlabReinforcementScript(BaseScriptObject):
 
         self.contour = [(x1 + nx, y1 + ny), (x2 + nx, y2 + ny),
                         (x2 - nx, y2 - ny), (x1 - nx, y1 - ny)]
-        self.openings = []
+        self.detected_openings = []
 
 
     def _read_element_thickness_and_level(self, element):
@@ -522,7 +786,22 @@ class SlabReinforcement():
         self.width = build_ele.SlabWidth.value
         self.thickness = thickness_override or build_ele.SlabThickness.value
 
-        self.concrete_cover = build_ele.ConcreteCover.value
+        # Betondeckung: entweder ein Wert für alles oder getrennt nach
+        # unten (UK Decke bis Aussenkante 1. Lage), oben (OK Decke bis
+        # Aussenkante 4. Lage) und seitlich (Stabenden)
+        if build_ele.CoverMode.value == 'Getrennt':
+            self.cover_bottom = build_ele.CoverBottom.value
+            self.cover_top = build_ele.CoverTop.value
+            self.cover_side = build_ele.CoverSide.value
+        else:
+            self.cover_bottom = self.cover_top = self.cover_side = \
+                build_ele.ConcreteCover.value
+
+        # Seitliche Deckung wirkt auf die Stabenden und Verlegeränder
+        self.concrete_cover = self.cover_side
+
+        self.stirrup_style = build_ele.StirrupStyle.value
+        self.opening_stirrup_style = build_ele.OpeningStirrupStyle.value
         self.concrete_grade = build_ele.ConcreteGrade.value
 
         # Seitenausbildung und Stoßlänge (als Vielfaches des Stabdurchmessers)
@@ -540,29 +819,62 @@ class SlabReinforcement():
         # Abtreppung an schrägen Rändern
         self.step_max_loss = build_ele.StepMaxLoss.value
         self.step_length_raster = build_ele.StepLengthRaster.value
+
+        # Woran wird die Länge einer Abtreppungsstufe gemessen? Am längsten
+        # Stab ragen die kürzeren um bis zu StepMaxLoss über ihre eigene
+        # Länge hinaus — also in die seitliche Deckung hinein. Am kürzesten
+        # bleibt jeder Stab im Beton.
+        self.step_reference = SHORTEST \
+            if build_ele.StepMeasuredAt.value == 'Kürzestes Eisen' else LONGEST
         self.max_edge_setback = build_ele.MaxEdgeSetback.value
+
+        # Variante A: Rechteckgrenzen fluchten über die Bänder hinweg,
+        # Variante B: das Rechteck endet erst am Beginn der Schräge
+        self.snap_rect_to_contour = build_ele.RectBoundary.value == 'An Konturkanten'
 
         # Stösse
         self.max_bar_length = build_ele.MaxBarLength.value
         self._lap_warning_shown = False
-        self.stagger_active = build_ele.StaggerLaps.value
-        self.stagger_factor = build_ele.StaggerFactor.value
         self.lap_opening_margin = build_ele.LapOpeningMargin.value
 
         self.position_counter = 0
 
         self.layers = self._create_layer_configs()
 
-        # Öffnungsdaten des Rechteckmodus (eine rechteckige Öffnung)
-        self.has_opening = build_ele.HasOpening.value and self.contour is None
+        # ---------- Aussparungen ----------
+        # Rechteckmodus mit Zahlen-Eingabe: eine achsparallele Öffnung, die
+        # über die Bandlogik läuft (schnellster Weg für den Standardfall)
+        self.has_opening = (build_ele.RectOpeningActive.value
+                            and self.contour is None
+                            and not self.contour_openings)
         self.opening_x = (build_ele.OpeningX.value,
                           build_ele.OpeningX.value + build_ele.OpeningWidth.value)
         self.opening_y = (build_ele.OpeningY.value,
                           build_ele.OpeningY.value + build_ele.OpeningHeight.value)
 
         if self.has_opening and (build_ele.OpeningWidth.value <= 0 or build_ele.OpeningHeight.value <= 0):
-            print('SlabReinforcement: Öffnung mit Breite/Höhe <= 0 wird ignoriert')
+            print('SlabReinforcement: Aussparung mit Breite/Höhe <= 0 wird ignoriert')
             self.has_opening = False
+
+        # Polygonale Aussparungen im Rechteckmodus: die Bandlogik kennt nur
+        # achsparallele Rechtecke, deshalb wird die Rechteckplatte hier zur
+        # Kontur und läuft über den (allgemeinen) Scanline-Pfad
+        if self.contour is None and self.contour_openings:
+            self.contour = [(0.0, 0.0), (self.length, 0.0),
+                            (self.length, self.width), (0.0, self.width)]
+            print('SlabReinforcement: polygonale Aussparung im Rechteckmodus — '
+                  'die Platte wird als Kontur verlegt')
+
+        if build_ele.RectOpeningActive.value and not self.has_opening:
+            # Überall sonst wird das Zahlen-Rechteck als gewöhnliches
+            # Aussparungspolygon behandelt und einfach mit angehängt
+            x_from, x_to = self.opening_x
+            y_from, y_to = self.opening_y
+
+            if x_to > x_from and y_to > y_from:
+                self.contour_openings = list(self.contour_openings) + \
+                    [[(x_from, y_from), (x_to, y_from),
+                      (x_to, y_to), (x_from, y_to)]]
 
 
     def _pnt(self, x: float, y: float, z: float = 0.0) -> AllplanGeo.Point3D:
@@ -626,8 +938,6 @@ class SlabReinforcement():
         # liegt direkt auf bzw. unter der Betondeckung, die innere darüber
         # bzw. darunter. Eine einzige Betondeckung gilt für alle Lagen und
         # für die Stabenden (Seitendeckung).
-        cover = self.concrete_cover
-
         # Auf den Anfangsbuchstaben pruefen statt auf den vollen Text: sonst
         # landet jede geaenderte Beschriftung stillschweigend im Else-Zweig,
         # und der Umschalter wirkt scheinbar gar nicht
@@ -647,10 +957,14 @@ class SlabReinforcement():
             bottom_outer, bottom_inner = bottom_y, bottom_x
             top_outer, top_inner = top_y, top_x
 
-        bottom_outer.z_axis = cover + bottom_outer.diameter / 2.0
-        bottom_inner.z_axis = cover + bottom_outer.diameter + bottom_inner.diameter / 2.0
-        top_outer.z_axis = self.thickness - cover - top_outer.diameter / 2.0
-        top_inner.z_axis = self.thickness - cover - top_outer.diameter - top_inner.diameter / 2.0
+        # unten: Deckung bis Aussenkante der 1. Lage, die 2. Lage liegt
+        # darüber; oben spiegelbildlich ab Aussenkante der 4. Lage
+        bottom_outer.z_axis = self.cover_bottom + bottom_outer.diameter / 2.0
+        bottom_inner.z_axis = self.cover_bottom + bottom_outer.diameter + \
+            bottom_inner.diameter / 2.0
+        top_outer.z_axis = self.thickness - self.cover_top - top_outer.diameter / 2.0
+        top_inner.z_axis = self.thickness - self.cover_top - top_outer.diameter - \
+            top_inner.diameter / 2.0
 
         layers = [bottom_outer, bottom_inner, top_inner, top_outer]
 
@@ -685,7 +999,8 @@ class SlabReinforcement():
         """Erzeugt Ansichtsgeometrie und alle Placements."""
 
         model_ele_list = ModelEleList(self.build_ele.CommonProp.value)
-        model_ele_list.append_geometry_3d(self._create_view_geometry())
+        for geometry in self._create_view_geometry():
+            model_ele_list.append_geometry_3d(geometry)
 
         reinf_ele_list = ModelEleList()
 
@@ -706,14 +1021,15 @@ class SlabReinforcement():
 
             handle_list = self._create_handles()
         else:
-            if any(side != SIDE_NONE for side in (self.side_left, self.side_right,
-                                                  self.side_bottom, self.side_top)):
-                print('SlabReinforcement: Randbügel/Anschlusseisen werden im '
-                      'Polygon-/Elementmodus (noch) nicht erzeugt')
+            for placement in self._create_contour_edge_reinforcement():
+                reinf_ele_list.append(placement)
 
             for layer in self.layers:
                 for placement in self._create_contour_layer_placements(layer):
                     reinf_ele_list.append(placement)
+
+            for placement in self._create_opening_reinforcement():
+                reinf_ele_list.append(placement)
 
             handle_list = HandleList()
 
@@ -738,10 +1054,10 @@ class SlabReinforcement():
                                    placement_point=placement_point)
 
 
-    def _create_view_geometry(self):
-        """Ansichtsgeometrie: Rechteckmodus ein Plattenkörper (Öffnung wird,
-        wenn möglich, boolesch abgezogen); Konturmodus die Konturpolygone
-        auf Höhe der Plattenunterkante.
+    def _create_view_geometry(self) -> list:
+        """Ansichtsgeometrie: Rechteckmodus ein Plattenkörper (Aussparung
+        wird, wenn möglich, boolesch abgezogen); Konturmodus die Kontur- und
+        Aussparungspolygone auf Höhe der Plattenunterkante.
         """
 
         if self.contour is None:
@@ -750,7 +1066,7 @@ class SlabReinforcement():
                 self.length, self.width, self.thickness)
 
             if not self.has_opening:
-                return slab
+                return [slab]
 
             opening = AllplanGeo.Polyhedron3D.CreateCuboid(
                 AllplanGeo.AxisPlacement3D(self._pnt(self.opening_x[0], self.opening_y[0], -1.0)),
@@ -761,18 +1077,23 @@ class SlabReinforcement():
             err, slab_with_opening = AllplanGeo.MakeSubtraction(slab, opening)
 
             if err != AllplanGeo.eGeometryErrorCode.eOK or slab_with_opening is None:
-                return slab
+                return [slab]
 
-            return slab_with_opening
+            return [slab_with_opening]
 
-        polygon = AllplanGeo.Polygon3D()
+        polygons = []
 
-        for x, y in self.contour:
-            polygon += AllplanGeo.Point3D(x, y, self.base_z)
+        for loop in [self.contour] + list(self.contour_openings):
+            polygon = AllplanGeo.Polygon3D()
 
-        polygon += AllplanGeo.Point3D(self.contour[0][0], self.contour[0][1], self.base_z)
+            for x, y in loop:
+                polygon += AllplanGeo.Point3D(x, y, self.base_z)
 
-        return polygon
+            polygon += AllplanGeo.Point3D(loop[0][0], loop[0][1], self.base_z)
+
+            polygons.append(polygon)
+
+        return polygons
 
 
     def _create_handles(self) -> HandleList:
@@ -978,21 +1299,9 @@ class SlabReinforcement():
                                 place_cover_from, place_cover_to)]
 
                 for region_from, region_to, spacing, region_cover_from, region_cover_to in regions:
-                    # Ohne Stoss keine Aufteilung in gerade/ungerade Stäbe
-                    unstaggered = self._lap_pieces((net_from, net_to), layer, 0.0, zones)
-
-                    groups = self._stagger_regions(region_from, region_to, spacing,
-                                                   region_cover_from, region_cover_to,
-                                                   layer, len(unstaggered) > 1)
-
-                    for sub_cover_from, sub_spacing, sub_count, shift in groups:
-                        if sub_count is not None and sub_count <= 0:
-                            continue
-
-                        pieces = self._lap_pieces((net_from, net_to), layer, shift, zones) \
-                            if shift else unstaggered
-
-                        for piece_from, piece_to in pieces:
+                    for piece_from, piece_to in self._lap_pieces((net_from, net_to),
+                                                                 layer, 0.0, zones):
+                        if True:
                             piece_shape = self._create_straight_bar_shape(
                                 layer, piece_to - piece_from, 0.0, 0.0)
 
@@ -1001,28 +1310,14 @@ class SlabReinforcement():
                             else:
                                 offset = AllplanGeo.Point3D(0, piece_from, 0)
 
-                            if sub_count is None:
-                                placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
-                                    self._next_position(),
-                                    piece_shape,
-                                    region_from + offset,
-                                    region_to + offset,
-                                    sub_cover_from,
-                                    region_cover_to,
-                                    sub_spacing)
-                            else:
-                                # Versetzte Gruppen über Startpunkt/Abstand/Anzahl,
-                                # damit der erste Stab exakt auf seiner Position
-                                # liegt und beide Gruppen ein geschlossenes Raster
-                                # bilden
-                                placement = LinearBarBuilder.create_linear_bar_placement_from_by_dist_count(
-                                    self._next_position(),
-                                    piece_shape,
-                                    region_from + offset,
-                                    region_to + offset,
-                                    sub_cover_from,
-                                    sub_spacing,
-                                    sub_count)
+                            placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+                                self._next_position(),
+                                piece_shape,
+                                region_from + offset,
+                                region_to + offset,
+                                region_cover_from,
+                                region_cover_to,
+                                spacing)
 
                             self._set_placement_layer(placement, layer.allplan_layer)
                             placements.append(placement)
@@ -1328,6 +1623,760 @@ class SlabReinforcement():
         return placements
 
 
+    def _hook_length(self, layer: LayerConfig) -> float:
+        """Schenkellänge des angebogenen Randbügels.
+
+        Entspricht dem Achsmass des einzelnen U-Bügels: Aussenmass über
+        beide Lagen derselben Richtung, auf ganze cm abgerundet, minus
+        Stabdurchmesser.
+        """
+
+        partners = [item for item in self.layers if item.direction == layer.direction]
+
+        bottom = next((item for item in partners if not item.is_top), None)
+        top = next((item for item in partners if item.is_top), None)
+
+        if bottom is None or top is None:
+            return 0.0
+
+        outer = (top.z_axis + top.diameter / 2.0) - (bottom.z_axis - bottom.diameter / 2.0)
+
+        return max(int(outer / 10.0) * 10.0 - layer.diameter, 0.0)
+
+
+    def _hook_edges(self, layer: LayerConfig) -> list[tuple[tuple, tuple]]:
+        """Kanten, an denen die Stäbe dieser Lage angebogen werden.
+
+        Angebogen wird nur an den unteren Lagen (1. und 2. Lage) und nur an
+        Kanten, in die die Stäbe hineinlaufen — Kanten parallel zur
+        Stabrichtung scheiden aus. Schrägen sind ausdrücklich dabei: dort
+        entsteht die Abtreppung, und auch deren Stäbe brauchen einen
+        Abschlussbügel. Plattenrand und Aussparungsrand haben je eine
+        eigene Palettenoption (StirrupStyle bzw. OpeningStirrupStyle).
+
+        Returns:
+            Liste (Startpunkt, Endpunkt) der Kante als 2D-Tupel.
+        """
+
+        if layer.is_top or not self.contour:
+            return []
+
+        dist_axis = 1 if layer.direction == 'X' else 0
+
+        edges = []
+
+        if self.stirrup_style != 'Einzeln':
+            for _, option, _, start, end, _ in self._contour_edges():
+                if option != SIDE_STIRRUP:
+                    continue
+
+                # Kante parallel zur Stabrichtung -> der Stab läuft nicht hinein
+                if abs(end[dist_axis] - start[dist_axis]) < 1.0:
+                    continue
+
+                edges.append((start, end))
+
+        # Aussparungskanten: gleiche Regel, eigene Palettenoption
+        if self.opening_stirrup_style == 'Am Eisen angebogen':
+            for opening in self.contour_openings:
+                for index, start in enumerate(opening):
+                    end = opening[(index + 1) % len(opening)]
+
+                    if abs(end[dist_axis] - start[dist_axis]) < 1.0:
+                        continue
+
+                    edges.append((start, end))
+
+        return edges
+
+
+    def _edge_run_at(self, edge: tuple[tuple, tuple], position: float,
+                     run_axis: int) -> float | None:
+        """Koordinate auf der Stabachse, an der die Kante die Scanlinie bei
+        position schneidet — None, wenn die Kante dort nicht liegt.
+        """
+
+        dist_axis = 1 - run_axis
+        start, end = edge
+
+        d1, d2 = start[dist_axis], end[dist_axis]
+
+        if abs(d2 - d1) < 1e-9:
+            return None
+
+        if not (min(d1, d2) - 1.0 <= position <= max(d1, d2) + 1.0):
+            return None
+
+        t = (position - d1) / (d2 - d1)
+
+        return start[run_axis] + t * (end[run_axis] - start[run_axis])
+
+
+    def _piece_hooks(self,
+                     layer: LayerConfig,
+                     piece: tuple[float, float],
+                     positions: list[float]) -> tuple[float, float]:
+        """Bügelschenkel für die beiden Enden eines Teilstabes.
+
+        Ein Ende bekommt einen Bügel, wenn es an einer Randkante endet — im
+        rechtwinkligen Fall genau um die Deckung davor, in einer
+        Abtreppung um zusätzlich bis zu einer Stufe (Verkürzung + Raster)
+        zurückversetzt. Geprüft wird gegen die tatsächliche Kantenlage an
+        den Scan-Positionen der Verlegung, damit auch Schrägen greifen und
+        ein Stoss mitten in der Platte keinen Bügel bekommt.
+        """
+
+        edges = self._hook_edges(layer)
+        hook = self._hook_length(layer)
+
+        if not edges or hook <= 0:
+            return (0.0, 0.0)
+
+        run_axis = 0 if layer.direction == 'X' else 1
+
+        # Rückversatz, den ein Stabende gegenüber der Kante haben darf:
+        # Deckung (an der Schräge cover/sin, begrenzt durch MaxEdgeSetback)
+        # plus die Stufengrösse der Abtreppung
+        tol = max(self.cover_side, self.max_edge_setback) \
+            + self.step_max_loss + self.step_length_raster + 1.0
+
+        def hooked(value: float) -> bool:
+            for edge in edges:
+                for position in positions:
+                    edge_run = self._edge_run_at(edge, position, run_axis)
+
+                    if edge_run is not None and abs(value - edge_run) <= tol:
+                        return True
+
+            return False
+
+        return (hook if hooked(piece[0]) else 0.0,
+                hook if hooked(piece[1]) else 0.0)
+
+
+    def _create_bar_with_edge_stirrups(self,
+                                       layer: LayerConfig,
+                                       length: float,
+                                       start_leg: float,
+                                       end_leg: float) -> AllplanReinf.BendingShape:
+        """Stab mit angebogenem Randbügel an einem oder beiden Enden.
+
+        Der Bügel hat dieselbe Form wie ein einzelner U-Bügel: Der Stab
+        bildet den unteren Schenkel, am Rand geht er über den Steg nach
+        oben und mit dem oberen Schenkel wieder nach innen. Ein einfacher
+        Haken (nur eine Biegung) reicht dafür nicht, deshalb wird die Form
+        über eine Freiform aus Punkten aufgebaut.
+        """
+
+        web = self._hook_length(layer)
+        leg = self.overlap_factor * layer.diameter - 0.5 * layer.diameter
+
+        points = []
+
+        if start_leg > 0:
+            points.append(AllplanGeo.Point2D(min(leg, length), web))
+            points.append(AllplanGeo.Point2D(0.0, web))
+
+        points.append(AllplanGeo.Point2D(0.0, 0.0))
+        points.append(AllplanGeo.Point2D(length, 0.0))
+
+        if end_leg > 0:
+            points.append(AllplanGeo.Point2D(length, web))
+            points.append(AllplanGeo.Point2D(length - min(leg, length), web))
+
+        model_angles = RotationUtil(90, 0, 0) if layer.direction == 'X' \
+            else RotationUtil(90, 0, 90)
+
+        return GeneralShapeBuilder.create_freeform_shape_with_hooks(
+            points, model_angles, self._shape_props(layer), 0.0, -1, -1)
+
+
+    # ==================== Konturmodus: Randausbildung ====================
+
+    def _contour_edges(self) -> list[tuple[int, str, float, tuple, tuple]]:
+        """Klassifiziert jede Konturkante nach ihrer Aussennormalen.
+
+        Die vier Palettenoptionen (Links/Rechts/Unten/Oben) gelten damit
+        auch für Polygone: Jede Kante bekommt die Option der Richtung, in
+        die ihre Aussennormale zeigt.
+
+        Returns:
+            Liste (Kantenindex, Option, Innennormalen-Winkel [Grad],
+            Startpunkt, Endpunkt)
+        """
+
+        if not self.contour:
+            return []
+
+        # Umlaufsinn bestimmen, damit die Normale wirklich nach aussen zeigt
+        area = loop_area(self.contour)
+        sign = 1.0 if area > 0 else -1.0
+
+        edges = []
+
+        bbox = loop_bbox(self.contour)
+
+        for index, start in enumerate(self.contour):
+            end = self.contour[(index + 1) % len(self.contour)]
+
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length = math.hypot(dx, dy)
+
+            if length < 1.0:
+                continue
+
+            # Achsparallel? Nur solche Kanten bekommen Randbügel; schräge
+            # Kanten werden ignoriert und die parallelen Nachbarkanten
+            # laufen bis zur Bounding Box weiter, als wäre die Schräge
+            # ausgefüllt
+            axis_parallel = abs(dx) < 1.0 or abs(dy) < 1.0
+
+            if axis_parallel:
+                previous = self.contour[index - 1]
+                following = self.contour[(index + 2) % len(self.contour)]
+
+                start, end = self._extend_over_slants(start, end, previous,
+                                                      following, bbox)
+
+                dx, dy = end[0] - start[0], end[1] - start[1]
+                length = math.hypot(dx, dy)
+
+            # Aussennormale bei positivem Umlaufsinn: (dy, -dx)
+            nx, ny = sign * dy / length, -sign * dx / length
+
+            if abs(nx) >= abs(ny):
+                option = self.side_right if nx > 0 else self.side_left
+            else:
+                option = self.side_top if ny > 0 else self.side_bottom
+
+            # Innennormale (dorthin zeigen die Bügelschenkel)
+            inward = math.degrees(math.atan2(-ny, -nx))
+
+            edges.append((index, option, inward, start, end, axis_parallel))
+
+        return edges
+
+
+    def _extend_over_slants(self, start, end, previous, following, bbox):
+        """Verlängert eine achsparallele Kante über angrenzende Schrägen
+        hinweg bis zur Bounding Box — der Randbügel fährt dann durch, als
+        wäre die Schräge ausgefüllt.
+        """
+
+        horizontal = abs(end[1] - start[1]) < 1.0
+        axis = 0 if horizontal else 1
+        low, high = bbox[axis], bbox[axis + 2]
+
+        forward = end[axis] >= start[axis]
+
+        def slanted(a, b):
+            return abs(a[0] - b[0]) > 1.0 and abs(a[1] - b[1]) > 1.0
+
+        new_start, new_end = list(start), list(end)
+
+        if slanted(previous, start):
+            new_start[axis] = low if forward else high
+
+        if slanted(end, following):
+            new_end[axis] = high if forward else low
+
+        return tuple(new_start), tuple(new_end)
+
+
+    def _edge_extensions(self, layer: LayerConfig) -> dict[int, float]:
+        """Überstand je Konturkante für Anschlusseisen dieser Lage."""
+
+        lap = self.overlap_factor * layer.diameter
+
+        return {index: lap for index, option, _, _, _, _ in self._contour_edges()
+                if option == SIDE_CONNECT}
+
+
+    # ============ Aussparungen: Bewehrung beliebiger Polygone ============
+
+    def _opening_reinf_layer(self,
+                             name: str,
+                             is_top: bool,
+                             stack_index: int,
+                             diameter: float,
+                             spacing: float,
+                             allplan_layer: int | None = None) -> LayerConfig | None:
+        """Zulagenebene innerhalb der Hauptlagen.
+
+        Unten liegen die Zulagen **oberhalb** der inneren unteren Lage, oben
+        **unterhalb** der inneren oberen Lage. stack_index stapelt mehrere
+        Zulagenrichtungen übereinander, damit sich Stäbe nicht durchdringen.
+        Gibt None zurück, wenn dafür kein Platz zwischen den Hauptlagen ist.
+        """
+
+        mains = [layer for layer in self.layers if layer.is_top == is_top]
+        opposite = [layer for layer in self.layers if layer.is_top != is_top]
+
+        if not mains:
+            return None
+
+        if is_top:
+            base = min(layer.z_axis - layer.diameter / 2.0 for layer in mains)
+            z_axis = base - (stack_index + 0.5) * diameter
+            limit = max((layer.z_axis + layer.diameter / 2.0
+                         for layer in opposite), default=0.0)
+            no_room = z_axis - diameter / 2.0 < limit
+        else:
+            base = max(layer.z_axis + layer.diameter / 2.0 for layer in mains)
+            z_axis = base + (stack_index + 0.5) * diameter
+            limit = min((layer.z_axis - layer.diameter / 2.0
+                         for layer in opposite), default=self.thickness)
+            no_room = z_axis + diameter / 2.0 > limit
+
+        if no_room:
+            print(f'SlabReinforcement: Zulage "{name}" entfällt — '
+                  f'kein Platz zwischen den Hauptlagen')
+            return None
+
+        reference = next((layer for layer in mains), None)
+
+        layer = LayerConfig(name, 'X', is_top, diameter, spacing,
+                            reference.steel_grade)
+        layer.z_axis = z_axis
+        layer.allplan_layer = allplan_layer if allplan_layer is not None \
+            else reference.allplan_layer
+        layer.bending_roller = AllplanReinf.BendingRollerService.GetBendingRollerFactor(
+            diameter, layer.steel_grade, -1, False)
+
+        return layer
+
+
+    def _place_free_bars(self,
+                         layer: LayerConfig,
+                         bars: list) -> AllplanReinf.BarPlacement | None:
+        """Verlegt eine Gruppe paralleler, gleich langer Stäbe beliebiger
+        Richtung als **eine** Verlegung.
+
+        Die Stabrichtung steckt im Rotationswinkel des Shapes, die
+        Verlegerichtung im Richtungspunkt — damit lassen sich auch die
+        schiefen Zulagen einer Aussparung wie eine normale Schar absetzen.
+        """
+
+        if not bars:
+            return None
+
+        first = bars[0]
+        length = first.length
+
+        if length <= 0:
+            return None
+
+        model_angles = RotationAngles(0, 0, first.angle)
+
+        shape = GeneralShapeBuilder.create_longitudinal_shape_with_hooks(
+            length, model_angles, self._shape_props(layer),
+            ConcreteCoverProperties(0.0, 0.0, 0.0, 0.0),
+            start_hook=-1, end_hook=-1)
+
+        from_pnt = self._pnt(first.start[0], first.start[1], layer.z_axis)
+
+        if len(bars) > 1:
+            second = bars[1]
+            direction_pnt = self._pnt(second.start[0], second.start[1], layer.z_axis)
+            spacing = math.hypot(second.start[0] - first.start[0],
+                                 second.start[1] - first.start[1])
+        else:
+            # Einzelstab: Verlegerichtung senkrecht zur Stabachse
+            angle = math.radians(first.angle)
+            direction_pnt = self._pnt(first.start[0] - math.sin(angle),
+                                      first.start[1] + math.cos(angle),
+                                      layer.z_axis)
+            spacing = layer.spacing
+
+        placement = LinearBarBuilder.create_linear_bar_placement_from_by_dist_count(
+            self._next_position(), shape, from_pnt, direction_pnt,
+            0.0, spacing, len(bars))
+
+        self._set_placement_layer(placement, layer.allplan_layer)
+
+        return placement
+
+
+    def _create_opening_reinforcement(self) -> list[AllplanReinf.BarPlacement]:
+        """Randzulagen und Diagonalzulagen um beliebige Aussparungspolygone.
+
+        Je Aussparungskante läuft eine Schar Zulagestäbe **parallel zu
+        dieser Kante**, mit Überstand um die Übergreifungslänge über beide
+        Ecken hinaus; anschliessend wird jeder Stab an der Plattenkontur und
+        an allen anderen Aussparungen abgeschnitten. Die Diagonalzulagen
+        überspannen die Ecken senkrecht zur Winkelhalbierenden.
+
+        Keine Norm belegt Anzahl, Durchmesser oder Länge dieser Zulagen —
+        SIA 262 fordert lediglich, freie Plattenränder einzufassen. Die
+        Werte sind daher Palettenparameter (Bürostandard).
+        """
+
+        build_ele = self.build_ele
+
+        if not self.contour_openings or self.contour is None:
+            return []
+
+        edge_active = build_ele.EdgeReinfActive.value
+        diagonal_active = build_ele.DiagonalActive.value
+
+        if not edge_active and not diagonal_active:
+            return []
+
+        min_length = max(build_ele.MinBarLength.value, 10.0)
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        for opening in self.contour_openings:
+            others = [loop for loop in self.contour_openings if loop is not opening]
+
+            if edge_active:
+                placements += self._place_opening_bars(
+                    opening, others, min_length,
+                    diameter=build_ele.EdgeBarDiameter.value,
+                    spacing=build_ele.EdgeBarSpacing.value,
+                    name='Randzulage Aussparung',
+                    bars_by_stack=self._opening_edge_bars_by_stack(opening),
+                    allplan_layer=build_ele.LayerOpeningEdge.value)
+
+            if diagonal_active:
+                diagonals = corner_diagonals(
+                    opening,
+                    build_ele.DiagonalCount.value,
+                    build_ele.DiagonalDiameter.value + build_ele.EdgeBarDiameter.value,
+                    build_ele.DiagonalLength.value,
+                    build_ele.DiagonalSpacing.value)
+
+                placements += self._place_opening_bars(
+                    opening, others, min_length,
+                    diameter=build_ele.DiagonalDiameter.value,
+                    spacing=build_ele.DiagonalSpacing.value,
+                    name='Diagonalzulage Aussparung',
+                    bars_by_stack={2: diagonals},
+                    allplan_layer=build_ele.LayerOpeningDiagonal.value)
+
+            placements += self._create_opening_stirrups(opening)
+
+        return placements
+
+
+    def _create_opening_stirrups(self, opening: list) -> list[AllplanReinf.BarPlacement]:
+        """Separate U-Randbügel entlang der Aussparungskanten.
+
+        Aufbau identisch zu den Randbügeln der Plattenkante: der offene
+        U-Bügel umgreift die beiden Lagen, deren Stäbe senkrecht auf die
+        Kante zulaufen, die Schenkel zeigen in den Beton hinein — bei einer
+        Aussparung also von der Öffnung weg.
+
+        Bei "Am Eisen angebogen" entsteht hier nichts: dann bekommen die
+        Lagenstäbe, die an der Aussparung enden, den Bügel angebogen
+        (siehe _hook_edges).
+        """
+
+        if self.opening_stirrup_style != 'Einzeln':
+            return []
+
+        spacing = self.build_ele.OpeningStirrupSpacing.value
+
+        if spacing <= 0:
+            return []
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        normals = outward_normals(opening)
+
+        for index, start in enumerate(opening):
+            end = opening[(index + 1) % len(opening)]
+
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length = math.hypot(dx, dy)
+
+            if length < 1.0:
+                continue
+
+            # Die Schenkel zeigen in den Beton: das ist bei einer Aussparung
+            # die Aussennormale des Öffnungspolygons
+            nx, ny = normals[index]
+            inward = math.degrees(math.atan2(ny, nx))
+
+            # Stäbe, die senkrecht auf diese Kante zulaufen
+            direction = 'X' if abs(nx) >= abs(ny) else 'Y'
+
+            layers = [layer for layer in self.layers if layer.direction == direction]
+            bottom = next((layer for layer in layers if not layer.is_top), None)
+            top = next((layer for layer in layers if layer.is_top), None)
+
+            if bottom is None or top is None:
+                continue
+
+            # Verlegelinie: Kante um die Deckung nach aussen versetzt und an
+            # beiden Enden um die Deckung eingezogen
+            ux, uy = dx / length, dy / length
+            offset = self.cover_side
+
+            from_2d = (start[0] + nx * offset + ux * offset,
+                       start[1] + ny * offset + uy * offset)
+            to_2d = (end[0] + nx * offset - ux * offset,
+                     end[1] + ny * offset - uy * offset)
+
+            if math.hypot(to_2d[0] - from_2d[0], to_2d[1] - from_2d[1]) < spacing:
+                continue
+
+            placement = self._create_contour_stirrup(
+                bottom, top, inward, from_2d, to_2d,
+                spacing=spacing,
+                # Layer der Lage, die in Bügelrichtung verläuft — dieselbe
+                # Lage, von der auch Ø, Abstand und Stahlgüte stammen
+                allplan_layer=bottom.allplan_layer)
+
+            if placement is not None:
+                placements.append(placement)
+
+        return placements
+
+
+    def _opening_edge_bars_by_stack(self, opening: list) -> dict:
+        """Randzulagen je Aussparung, nach Stapelebene sortiert.
+
+        Benachbarte Kanten stehen (fast) senkrecht aufeinander — ihre
+        Zulagen dürfen sich nicht durchdringen. Deshalb landen Kanten mit
+        geradem Index in der einen, Kanten mit ungeradem Index in der
+        anderen Ebene: bei einer rechteckigen Aussparung genau die beiden
+        Hauptrichtungen.
+        """
+
+        build_ele = self.build_ele
+
+        bars = opening_edge_bars(
+            opening,
+            build_ele.EdgeBarCount.value,
+            build_ele.EdgeBarDiameter.value,
+            build_ele.EdgeBarSpacing.value,
+            build_ele.LapLength.value)
+
+        by_stack: dict = {0: [], 1: []}
+
+        for bar in bars:
+            by_stack[bar.edge_index % 2].append(bar)
+
+        return by_stack
+
+
+    def _place_opening_bars(self,
+                            opening: list,
+                            others: list,
+                            min_length: float,
+                            diameter: float,
+                            spacing: float,
+                            name: str,
+                            bars_by_stack: dict,
+                            allplan_layer: int | None = None) -> list[AllplanReinf.BarPlacement]:
+        """Schneidet die Stäbe an Kontur und übrigen Aussparungen ab und
+        verlegt sie in allen vier Zulagenebenen (unten/oben je Stapel).
+        """
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        holes = [opening] + list(others)
+
+        for stack_index, bars in bars_by_stack.items():
+            if not bars:
+                continue
+
+            clipped: list = []
+
+            for bar in bars:
+                clipped += clip_bar(bar, self.contour, holes,
+                                    cover=self.cover_side,
+                                    max_setback=self.max_edge_setback,
+                                    min_length=min_length)
+
+            if not clipped:
+                continue
+
+            for is_top in (False, True):
+                layer = self._opening_reinf_layer(
+                    f'{name} {"oben" if is_top else "unten"} {stack_index + 1}',
+                    is_top, stack_index, diameter, spacing, allplan_layer)
+
+                if layer is None:
+                    continue
+
+                for group in group_equal_bars(clipped):
+                    placement = self._place_free_bars(layer, group)
+
+                    if placement is not None:
+                        placements.append(placement)
+
+        return placements
+
+
+    def _create_contour_edge_reinforcement(self) -> list[AllplanReinf.BarPlacement]:
+        """Randbügel und separate Anschlusseisen entlang der Konturkanten.
+
+        Aufbau wie im Deckenplatte-PythonPart: offene U-Bügel umgreifen die
+        beiden Lagen, deren Stäbe senkrecht auf die Kante zulaufen; die
+        Schenkel zeigen nach innen. Separate Anschlusseisen sind gerade
+        Stäbe der Länge 2 x Übergreifung, mittig auf der Kante.
+        """
+
+        placements: list[AllplanReinf.BarPlacement] = []
+
+        for index, option, inward, start, end, axis_parallel in self._contour_edges():
+            if option in (SIDE_NONE, SIDE_CONNECT):
+                continue
+
+            # Randbügel nur an achsparallelen Kanten; an schrägen Kanten
+            # übernehmen die verlängerten Nachbarkanten
+            if option == SIDE_STIRRUP and not axis_parallel:
+                continue
+
+            # "Am Eisen angebogen": kein eigener Bügel, stattdessen bekommen
+            # die Lagenstäbe an dieser Kante einen Haken
+            if option == SIDE_STIRRUP and self.stirrup_style != 'Einzeln':
+                continue
+
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length = math.hypot(dx, dy)
+
+            # Stäbe, die senkrecht auf diese Kante zulaufen
+            direction = 'X' if abs(math.cos(math.radians(inward))) >= \
+                abs(math.sin(math.radians(inward))) else 'Y'
+
+            layers = [layer for layer in self.layers if layer.direction == direction]
+            bottom = next((layer for layer in layers if not layer.is_top), None)
+            top = next((layer for layer in layers if layer.is_top), None)
+
+            if bottom is None or top is None:
+                continue
+
+            # Verlegelinie: Kante um die Deckung nach innen versetzt und an
+            # beiden Enden um die Deckung eingezogen
+            ux, uy = dx / length, dy / length
+            ix, iy = math.cos(math.radians(inward)), math.sin(math.radians(inward))
+            offset = self.concrete_cover
+
+            from_2d = (start[0] + ix * offset + ux * offset,
+                       start[1] + iy * offset + uy * offset)
+            to_2d = (end[0] + ix * offset - ux * offset,
+                     end[1] + iy * offset - uy * offset)
+
+            if math.hypot(to_2d[0] - from_2d[0], to_2d[1] - from_2d[1]) < bottom.spacing:
+                continue
+
+
+            if option == SIDE_STIRRUP:
+                placement = self._create_contour_stirrup(bottom, top, inward,
+                                                         from_2d, to_2d)
+            else:
+                placement = self._create_contour_separate_bar(bottom, inward,
+                                                              from_2d, to_2d)
+
+            if placement is not None:
+                placements.append(placement)
+
+        return placements
+
+
+    def _create_contour_stirrup(self,
+                                bottom: LayerConfig,
+                                top: LayerConfig,
+                                inward: float,
+                                from_2d: tuple,
+                                to_2d: tuple,
+                                spacing: float | None = None,
+                                allplan_layer: int | None = None):
+        """Offener U-Randbügel entlang einer Kante — Plattenrand oder
+        Aussparungsrand, je nach übergebener Verlegelinie und Innenrichtung.
+        """
+
+        diameter = bottom.diameter
+
+        # Aussenmass über beide Lagen, auf ganze cm abgerundet; der
+        # ShapeBuilder bekommt das Achsmass (Aussenmass - ø)
+        outer_height = (top.z_axis + top.diameter / 2.0) - \
+                       (bottom.z_axis - bottom.diameter / 2.0)
+        web_height = int(outer_height / 10.0) * 10.0 - diameter
+        leg_length = self.overlap_factor * diameter - 0.5 * diameter
+
+        if web_height <= 0 or leg_length <= 0:
+            print(f'SlabReinforcement: Randbügel entfällt — Bügelhöhe/Schenkel '
+                  f'nicht darstellbar')
+            return None
+
+        shape_props = ReinforcementShapeProperties.rebar(
+            diameter, bottom.bending_roller, bottom.steel_grade,
+            self.concrete_grade, AllplanReinf.BendingShapeType.OpenStirrup)
+
+        # Ry = -90 stellt den Steg senkrecht, Rz richtet die Schenkel nach
+        # innen (Vorbild: Rz = 0 / 180 / -90 / 90 für unten/oben/links/rechts,
+        # allgemein also Innennormale - 90 Grad)
+        angles = RotationAngles(0, -90, inward - 90.0)
+
+        shape = GeneralShapeBuilder.create_open_stirrup(
+            web_height, leg_length, angles, shape_props,
+            ConcreteCoverProperties(0.0, 0.0, 0.0, 0.0), -1, -1, 0.0, 0.0)
+
+        if not shape.IsValid():
+            print('SlabReinforcement: Randbügel-Shape ungültig — übersprungen')
+            return None
+
+        placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+            self._next_position(), shape,
+            self._pnt(from_2d[0], from_2d[1], bottom.z_axis),
+            self._pnt(to_2d[0], to_2d[1], bottom.z_axis),
+            0.0, 0.0, spacing if spacing else bottom.spacing)
+
+        if allplan_layer is not None:
+            layer_id = allplan_layer
+        else:
+            layer_id = self.build_ele.LayerStirrupX.value if bottom.direction == 'X' \
+                else self.build_ele.LayerStirrupY.value
+
+        self._set_placement_layer(placement, layer_id)
+
+        return placement
+
+
+    def _create_contour_separate_bar(self,
+                                     layer: LayerConfig,
+                                     inward: float,
+                                     from_2d: tuple,
+                                     to_2d: tuple):
+        """Separates Anschlusseisen: gerader Stab der Länge 2 x Übergreifung,
+        mittig auf der Kante, senkrecht dazu.
+        """
+
+        lap = self.overlap_factor * layer.diameter
+
+        # Der Stab steht je zur Hälfte in und ausserhalb der Platte; die
+        # Verlegelinie liegt deshalb um die Deckung zurück auf der Kante
+        ix, iy = math.cos(math.radians(inward)), math.sin(math.radians(inward))
+        back = self.concrete_cover
+
+        bar = LayerConfig(f'Separates Anschlusseisen {layer.direction}',
+                          layer.direction, layer.is_top, layer.diameter,
+                          layer.spacing, layer.steel_grade)
+        bar.z_axis = layer.z_axis
+        bar.bending_roller = layer.bending_roller
+        bar.allplan_layer = layer.allplan_layer
+
+        shape = self._create_straight_bar_shape(bar, 2 * lap, 0.0, 0.0)
+
+        # Stabanfang: von der Kante aus lap nach aussen
+        start = (from_2d[0] - ix * back - ix * lap, from_2d[1] - iy * back - iy * lap)
+        end = (to_2d[0] - ix * back - ix * lap, to_2d[1] - iy * back - iy * lap)
+
+        placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
+            self._next_position(), shape,
+            self._pnt(start[0], start[1], bar.z_axis),
+            self._pnt(end[0], end[1], bar.z_axis),
+            0.0, 0.0, bar.spacing)
+
+        self._set_placement_layer(placement, bar.allplan_layer)
+
+        return placement
+
+
     # ==================== Konturmodus (Scanline) ====================
 
     def _create_contour_layer_placements(self, layer: LayerConfig) -> list[AllplanReinf.BarPlacement]:
@@ -1354,104 +2403,37 @@ class SlabReinforcement():
             edge_zone_length=self.edge_zone_length if self.edge_zones_active else 0.0,
             edge_zone_spacing=self.edge_zone_spacing if self.edge_zones_active else 0.0,
             max_setback=self.max_edge_setback,
-            dist_margin=self.concrete_cover + layer.diameter / 2.0)
+            dist_margin=self.concrete_cover + layer.diameter / 2.0,
+            edge_extensions=self._edge_extensions(layer))
 
+        # Schritt 1: Zerlegung in Rechtecke und Abtreppungszonen
+        zones = decompose_into_zones(bars, self.contour, run_axis,
+                                     max_step_deviation=self.step_max_loss,
+                                     length_raster=self.step_length_raster,
+                                     min_bar_length=min_bar_length,
+                                     snap_to_contour=self.snap_rect_to_contour,
+                                     step_reference=self.step_reference)
+
+        # Schritt 2: Übergreifung an jeder Verlegungsgrenze längs der Stäbe
+        zones = apply_boundary_laps(zones, self.overlap_factor * layer.diameter)
+
+        # Schritt 3: je Zone eine Verlegung; ein Stab, der immer noch länger
+        # als die zulässige Stablänge ist, wird zusätzlich gestossen
         placements: list[AllplanReinf.BarPlacement] = []
 
-        # Abtreppung an schrägen Rändern: Stäbe werden zu Stufen gleicher
-        # Länge gruppiert, solange kein Stab dabei mehr als StepMaxLoss
-        # kürzer wird als geometrisch möglich
-        for run in group_bars_into_steps(bars,
-                                         max_step_loss=self.step_max_loss,
-                                         length_raster=self.step_length_raster,
-                                         min_bar_length=min_bar_length):
-            zones = self._lap_forbidden_zones(run_axis, run.positions)
+        for zone in zones:
+            forbidden = self._lap_forbidden_zones(run_axis, zone.positions)
 
-            for segment in run.segments:
-                # Ohne Stoss keine Aufteilung in gerade/ungerade Stäbe
-                unstaggered = self._lap_pieces(segment, layer, 0.0, zones)
-
-                # Stossversatz: gerade und ungerade Stäbe des Laufes werden
-                # getrennt verlegt (doppelter Abstand), damit die Stösse
-                # benachbarter Stäbe zueinander versetzt liegen
-                for positions, shift in self._stagger_groups(run.positions, layer,
-                                                             len(unstaggered) > 1):
-                    pieces = self._lap_pieces(segment, layer, shift, zones) \
-                        if shift else unstaggered
-
-                    for piece in pieces:
-                        placements.append(
-                            self._place_contour_piece(layer, run_axis, piece, positions))
+            for segment in zone.segments[0]:
+                for piece in self._lap_pieces(segment, layer, 0.0, forbidden):
+                    placements.append(
+                        self._place_contour_piece(layer, run_axis, piece, zone.positions))
 
         layer.placements = placements
 
         return placements
 
 
-    def _stagger_groups(self,
-                        positions: list[float],
-                        layer: LayerConfig,
-                        has_laps: bool) -> list[tuple[list[float], float]]:
-        """Teilt einen Verlegelauf für den Stossversatz auf.
-
-        Ohne Stoss (oder ohne Versatz) bleibt es bei einer Gruppe — sonst
-        entstünden doppelt so viele Placements ohne Nutzen. Sonst werden
-        gerade und ungerade Stäbe getrennt, damit beide Gruppen
-        unterschiedliche Stosslagen bekommen.
-        """
-
-        stagger_offset = self.stagger_factor * self.overlap_factor * layer.diameter
-
-        if not self.stagger_active or stagger_offset <= 0 or len(positions) < 2 or not has_laps:
-            return [(positions, 0.0)]
-
-        return [(positions[0::2], stagger_shift(0, stagger_offset)),
-                (positions[1::2], stagger_shift(1, stagger_offset))]
-
-
-    def _stagger_regions(self,
-                         region_from: AllplanGeo.Point3D,
-                         region_to: AllplanGeo.Point3D,
-                         spacing: float,
-                         cover_from: float,
-                         cover_to: float,
-                         layer: LayerConfig,
-                         has_laps: bool) -> list[tuple[float, float, int | None, float]]:
-        """Stossversatz im Rechteckmodus.
-
-        Ohne Stoss (oder ohne Versatz) bleibt es bei einem Placement mit dem
-        normalen Stababstand — Stabanzahl None bedeutet "Verlegung von/bis".
-
-        Mit Stoss entstehen zwei Placements mit doppeltem Stababstand: das
-        zweite um einen Stababstand versetzt, beide mit eigener Stosslage.
-        Damit ist in jedem Schnitt höchstens die Hälfte der Stäbe gestossen
-        (SIA 262, Ziff. 5.2.6.6). Beide Gruppen werden über
-        Startpunkt/Abstand/Anzahl verlegt, damit ihre Stäbe exakt auf dem
-        ursprünglichen Raster liegen.
-
-        Returns:
-            Liste (Deckung am Anfang, Stababstand, Stabanzahl oder None,
-            Stossverschiebung)
-        """
-
-        stagger_offset = self.stagger_factor * self.overlap_factor * layer.diameter
-
-        if not self.stagger_active or stagger_offset <= 0 or not has_laps or spacing <= 0:
-            return [(cover_from, spacing, None, 0.0)]
-
-        length = ((region_to.X - region_from.X) ** 2 +
-                  (region_to.Y - region_from.Y) ** 2) ** 0.5 - cover_from - cover_to
-
-        if length < 0:
-            return []
-
-        count = int(length / spacing + 1e-9) + 1
-
-        if count < 2:
-            return [(cover_from, spacing, None, 0.0)]
-
-        return [(cover_from, 2 * spacing, (count + 1) // 2, stagger_shift(0, stagger_offset)),
-                (cover_from + spacing, 2 * spacing, count // 2, stagger_shift(1, stagger_offset))]
 
 
     def _lap_pieces(self,
@@ -1517,8 +2499,16 @@ class SlabReinforcement():
 
         piece_from, piece_to = piece
 
-        # Nettolänge: die Deckung steckt bereits in den Segmentgrenzen
-        shape = self._create_straight_bar_shape(layer, piece_to - piece_from, 0.0, 0.0)
+        # Nettolänge: die Deckung steckt bereits in den Segmentgrenzen.
+        # Liegt ein Ende auf einer Randkante mit angebogenem Bügel, wird der
+        # Stab als Freiform mit vollem U-Bügel aufgebaut.
+        start_leg, end_leg = self._piece_hooks(layer, piece, positions)
+
+        if start_leg > 0 or end_leg > 0:
+            shape = self._create_bar_with_edge_stirrups(layer, piece_to - piece_from,
+                                                        start_leg, end_leg)
+        else:
+            shape = self._create_straight_bar_shape(layer, piece_to - piece_from, 0.0, 0.0)
 
         first = positions[0]
 
