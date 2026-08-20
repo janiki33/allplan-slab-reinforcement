@@ -18,8 +18,8 @@ setlocal
 title SlabReinforcement aktualisieren
 
 set "REPO=janiki33/allplan-slab-reinforcement"
-set "BRANCH=claude/new-session-8uzquy"
-set "TOOLBRANCH=claude/slab-reinforcement-sync-nykay9"
+set "BRANCH=main"
+set "TOOLBRANCH=main"
 set "TARGET=J:\Allplan\Usr\Janosch"
 
 set "CACHEDIR=%LOCALAPPDATA%\AllplanSlabReinforcementSync"

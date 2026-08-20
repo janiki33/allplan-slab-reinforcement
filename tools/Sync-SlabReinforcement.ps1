@@ -48,7 +48,7 @@
 [CmdletBinding()]
 param(
     [string]   $AllplanUsr     = 'J:\Allplan\Usr\Janosch',
-    [string]   $Branch         = 'claude/new-session-8uzquy',
+    [string]   $Branch         = 'main',
     [string]   $Repo           = 'janiki33/allplan-slab-reinforcement',
     [int]      $IntervalSeconds = 0,
     [switch]   $RemoveStale,

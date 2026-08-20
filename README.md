@@ -114,7 +114,7 @@ Einmal herunterladen, z. B. auf den Desktop:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -OutFile "$env:USERPROFILE\Desktop\Update-SlabReinforcement.cmd" `
-  https://raw.githubusercontent.com/janiki33/allplan-slab-reinforcement/claude/slab-reinforcement-sync-nykay9/tools/Update-SlabReinforcement.cmd
+  https://raw.githubusercontent.com/janiki33/allplan-slab-reinforcement/main/tools/Update-SlabReinforcement.cmd
 ```
 
 Danach genügt ein Doppelklick, wann immer der lokale Stand aktualisiert werden
