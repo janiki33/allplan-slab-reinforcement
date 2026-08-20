@@ -159,7 +159,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.7.3'
+SCRIPT_VERSION = '0.7.4'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -256,15 +256,35 @@ class SlabReinforcementScript(BaseScriptObject):
         # Ein abgesetztes PythonPart wird zum Bearbeiten mit einem frischen
         # ScriptObject geoeffnet: die Palettenwerte stellt Allplan wieder her,
         # die eingegebene Geometrie nicht. Ohne sie bliebe execute() leer und
-        # das Element waere nicht mehr bearbeitbar.
+        # das Element waere nicht mehr bearbeitbar. Der Merker sorgt dafuer,
+        # dass start_input() die Eingabe NICHT neu startet — Bearbeiten ist
+        # kein Neu-Definieren.
+        self._resume_editing = False
+
         if build_ele.InputMode.value == build_ele.INPUT_MODE_CREATION:
-            self._restore_state()
+            self._resume_editing = self._restore_state()
 
 
     def start_input(self):
-        """Ersteingabe je nach gewähltem Eingabemodus starten."""
+        """Ersteingabe je nach gewähltem Eingabemodus starten.
+
+        Beim Bearbeiten eines abgesetzten PythonParts wird die Geometrie
+        aus dem Element geladen und die Eingabe übersprungen — die Decke
+        muss nicht erneut ausgewählt oder gezeichnet werden. Der Merker
+        gilt nur einmal: wechselt der Anwender danach bewusst den
+        Eingabemodus, startet die Eingabe normal neu.
+        """
 
         build_ele = self.build_ele
+
+        if self._resume_editing:
+            self._resume_editing = False
+            self.script_object_interactor = None
+
+            print('SlabReinforcement: Bearbeitungsmodus — gespeicherte '
+                  'Geometrie übernommen, keine Neueingabe nötig')
+
+            return
 
         build_ele.InputMode.value = build_ele.INPUT_MODE_INPUT
 
@@ -1073,9 +1093,14 @@ class SlabReinforcement():
     def create(self) -> CreateElementResult:
         """Erzeugt Ansichtsgeometrie und alle Placements."""
 
+        # Die 3D-Hilfsflächen (Plattenkörper bzw. Konturpolygone) gehören
+        # nur zum PythonPart als dessen Ansichtsgeometrie. Ist "als
+        # PythonPart erzeugen" abgewählt, entsteht am Ende NUR die Bewehrung.
         model_ele_list = ModelEleList(self.build_ele.CommonProp.value)
-        for geometry in self._create_view_geometry():
-            model_ele_list.append_geometry_3d(geometry)
+
+        if self.build_ele.IsPythonPart.value:
+            for geometry in self._create_view_geometry():
+                model_ele_list.append_geometry_3d(geometry)
 
         reinf_ele_list = ModelEleList()
 
@@ -1124,7 +1149,7 @@ class SlabReinforcement():
                                        handle_list,
                                        placement_point=placement_point)
 
-        return CreateElementResult(elements=model_ele_list + reinf_ele_list,
+        return CreateElementResult(elements=reinf_ele_list,
                                    handles=handle_list,
                                    placement_point=placement_point)
 
