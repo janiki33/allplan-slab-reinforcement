@@ -155,7 +155,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.5.2'
+SCRIPT_VERSION = '0.6.0'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -172,12 +172,13 @@ INPUT_RECT = 'Rechteck (Drag)'
 INPUT_POLYGON = 'Polygon zeichnen'
 INPUT_ELEMENT = 'Element wählen'
 
-# Ermittlung der Aussparungen (Palette: OpeningMode)
-OPENING_AUTO = 'Automatisch erkennen'
-OPENING_DRAW = 'Polygon einzeichnen'
-OPENING_AUTO_DRAW = 'Automatisch + Polygon'
-OPENING_RECT = 'Rechteck (Eingabe)'
-OPENING_NONE = 'Keine'
+# Palettenbuttons der Aussparungsseite (EventId in der .pyp)
+EVENT_ADD_OPENING = 1001
+EVENT_REMOVE_LAST_OPENING = 1002
+EVENT_CLEAR_OPENINGS = 1003
+
+# Eingabestadium "Aussparung zeichnen"
+OPENING_STAGE = 1
 
 
 def check_allplan_version(_build_ele: BuildingElement,
@@ -230,12 +231,16 @@ class SlabReinforcementScript(BaseScriptObject):
         self.opening_result = PolygonInteractorResult()
         self.sel_result = SingleElementSelectResult()
 
-        # 0 = Kontur/Absetzpunkt, 1 = Aussparungspolygone
+        # 0 = Kontur/Absetzpunkt, OPENING_STAGE = Aussparungen zeichnen
         self.input_stage = 0
 
         self.placement_pnt = AllplanGeo.Point3D()
         self.contour: list[tuple[float, float]] | None = None
-        self.openings: list[list[tuple[float, float]]] = []
+
+        # Aussparungen aus zwei Quellen, getrennt gehalten: die automatisch
+        # erkannten werden bei jeder Neueingabe neu ermittelt, die
+        # gezeichneten sammeln sich über den Button an
+        self.detected_openings: list[list[tuple[float, float]]] = []
         self.drawn_openings: list[list[tuple[float, float]]] = []
         self.z_offset = 0.0
         self.thickness_override: float | None = None
@@ -256,7 +261,7 @@ class SlabReinforcementScript(BaseScriptObject):
         self.input_finished = False
         self.input_stage = 0
         self.contour = None
-        self.openings = []
+        self.detected_openings = []
         self.drawn_openings = []
         self.z_offset = 0.0
         self.thickness_override = None
@@ -295,66 +300,115 @@ class SlabReinforcementScript(BaseScriptObject):
         if build_ele.InputMode.value != build_ele.INPUT_MODE_INPUT:
             return
 
-        if self.input_stage == 0:
-            input_method = build_ele.InputMethod.value
-
-            if input_method == INPUT_ELEMENT:
-                self._process_selected_element()
-            elif input_method == INPUT_POLYGON:
-                self._process_drawn_polygons()
-            else:
-                self.placement_pnt = self.point_result.input_point
-
-            if self._openings_are_drawn():
-                # Zweite Runde: Aussparungen zeichnen. InputMode bleibt auf
-                # INPUT, damit noch keine Elemente erzeugt werden.
-                self.input_stage = 1
-                self.opening_result = PolygonInteractorResult()
-
-                self.script_object_interactor = PolygonInteractor(
-                    self.opening_result,
-                    z_coord_input=False,
-                    multi_polygon_input=True)
-
-                self.script_object_interactor.start_input(self.coord_input)
-
-                print('SlabReinforcement: Aussparungen zeichnen (ESC beendet)')
-
-                return
-        else:
+        if self.input_stage == OPENING_STAGE:
             self._process_drawn_openings()
+            self._finish_input()
+            return
+
+        input_method = build_ele.InputMethod.value
+
+        if input_method == INPUT_ELEMENT:
+            self._process_selected_element()
+        elif input_method == INPUT_POLYGON:
+            self._process_drawn_polygons()
+        else:
+            self.placement_pnt = self.point_result.input_point
 
         self._finish_input()
+
+
+    @property
+    def openings(self) -> list[list[tuple[float, float]]]:
+        """Alle Aussparungen: automatisch erkannte plus gezeichnete."""
+
+        detected = self.detected_openings \
+            if self.build_ele.DetectOpenings.value else []
+
+        return list(detected) + list(self.drawn_openings)
+
 
     def _finish_input(self):
         """Eingabe abschliessen und in den Erzeugungsmodus wechseln."""
 
         self.build_ele.InputMode.value = self.build_ele.INPUT_MODE_CREATION
 
+        self.input_stage = 0
         self.script_object_interactor = None
         self.input_finished = True
 
         print(f'SlabReinforcement: Eingabe abgeschlossen — '
               f'Kontur: {"ja" if self.contour else "nein (Rechteck)"}, '
-              f'Aussparungen: {len(self.openings)}')
+              f'Aussparungen: {len(self.openings)} '
+              f'({len(self.detected_openings)} erkannt, '
+              f'{len(self.drawn_openings)} gezeichnet)')
 
 
-    def _openings_are_drawn(self) -> bool:
-        """True, wenn nach der Kontur noch Aussparungen gezeichnet werden."""
+    def on_control_event(self, event_id: int) -> bool:
+        """Palettenbuttons der Aussparungsseite.
 
-        return self.build_ele.OpeningMode.value in (OPENING_DRAW, OPENING_AUTO_DRAW)
+        Aussparungen sind keine Voreinstellung, sondern werden nach und
+        nach hinzugefügt: "Aussparung zeichnen" startet jederzeit eine
+        weitere Eingaberunde und hängt das Ergebnis an die Liste an. Die
+        bereits erzeugte Bewehrung bleibt währenddessen sichtbar.
+
+        Rückgabe True = Palette neu aufbauen (Vertrag ab 2025).
+        """
+
+        if event_id == EVENT_ADD_OPENING:
+            self._start_opening_input()
+            return True
+
+        if event_id == EVENT_REMOVE_LAST_OPENING:
+            if self.drawn_openings:
+                self.drawn_openings.pop()
+                print(f'SlabReinforcement: letzte gezeichnete Aussparung '
+                      f'entfernt ({len(self.drawn_openings)} verbleiben)')
+            else:
+                print('SlabReinforcement: keine gezeichnete Aussparung vorhanden')
+
+            return True
+
+        if event_id == EVENT_CLEAR_OPENINGS:
+            print(f'SlabReinforcement: {len(self.drawn_openings)} gezeichnete '
+                  f'Aussparung(en) entfernt')
+            self.drawn_openings = []
+
+            return True
+
+        return False
+
+
+    def _start_opening_input(self):
+        """Weitere Eingaberunde: beliebig viele Aussparungspolygone
+        zeichnen, ESC beendet die Runde.
+        """
+
+        if not self.input_finished:
+            print('SlabReinforcement: zuerst die Plattenkontur eingeben')
+            return
+
+        self.input_stage = OPENING_STAGE
+        self.opening_result = PolygonInteractorResult()
+
+        # InputMode zurück auf INPUT, damit start_next_input das Ergebnis
+        # abholt; input_finished bleibt True, damit die bereits erzeugte
+        # Bewehrung während des Zeichnens sichtbar bleibt
+        self.build_ele.InputMode.value = self.build_ele.INPUT_MODE_INPUT
+
+        self.script_object_interactor = PolygonInteractor(
+            self.opening_result,
+            z_coord_input=False,
+            multi_polygon_input=True)
+
+        self.script_object_interactor.start_input(self.coord_input)
+
+        print('SlabReinforcement: Aussparung(en) zeichnen — ESC beendet die Eingabe')
 
 
     def _process_drawn_openings(self):
-        """Die in der zweiten Runde gezeichneten Polygone als Aussparungen
-        übernehmen. Automatisch erkannte bleiben erhalten, wenn der Modus
-        beides vorsieht.
-        """
+        """Die gezeichneten Polygone an die Aussparungsliste anhängen."""
 
         loops = self._loops_from_polygon_result(self.opening_result)
-
-        if self.build_ele.OpeningMode.value == OPENING_DRAW:
-            self.openings = []
 
         # Im Rechteckmodus liegt die Platte im lokalen System des
         # Absetzpunkts — die gezeichneten Polygone kommen global herein
@@ -363,9 +417,10 @@ class SlabReinforcementScript(BaseScriptObject):
             loops = [[(x - origin.X, y - origin.Y) for x, y in loop]
                      for loop in loops]
 
-        self.openings += loops
+        self.drawn_openings += loops
 
-        self.drawn_openings = loops
+        print(f'SlabReinforcement: {len(loops)} Aussparung(en) hinzugefügt '
+              f'({len(self.drawn_openings)} gezeichnete insgesamt)')
 
 
     def execute(self) -> CreateElementResult:
@@ -436,7 +491,7 @@ class SlabReinforcementScript(BaseScriptObject):
         neu — auch nach bereits abgeschlossener Eingabe.
         """
 
-        if name in ('InputMethod', 'OpeningMode'):
+        if name == 'InputMethod':
             self.start_input()
 
             if self.script_object_interactor is not None:
@@ -499,7 +554,7 @@ class SlabReinforcementScript(BaseScriptObject):
             # Aussparungen sind in Allplan eigene Kindelemente der Decke —
             # sie stecken nicht in deren Konturpolygon und müssen deshalb
             # zusätzlich gelesen werden. Ohne sie anzutippen.
-            self.openings += self._child_openings(sel_element)
+            self.detected_openings += self._child_openings(sel_element)
 
         else:
             print('SlabReinforcement: Geometrie des gewählten Elements wird '
@@ -518,7 +573,7 @@ class SlabReinforcementScript(BaseScriptObject):
         loops = sorted(loops, key=lambda loop: abs(loop_area(loop)), reverse=True)
 
         self.contour = loops[0]
-        self.openings = self._filter_openings(loops[1:])
+        self.detected_openings = self._filter_openings(loops[1:])
 
 
     def _child_openings(self, sel_element) -> list[list[tuple[float, float]]]:
@@ -538,8 +593,7 @@ class SlabReinforcementScript(BaseScriptObject):
         Aussparungen zu und auf sonst kaum ein Kindelement.
         """
 
-        if self.build_ele.OpeningMode.value not in (OPENING_AUTO, OPENING_AUTO_DRAW) \
-                or self.contour is None:
+        if not self.build_ele.DetectOpenings.value or self.contour is None:
             return []
 
         service = getattr(AllplanEleAdapter,
@@ -612,9 +666,7 @@ class SlabReinforcementScript(BaseScriptObject):
         (Rundungen, doppelte Punkte) und keine echten Aussparungen.
         """
 
-        mode = self.build_ele.OpeningMode.value
-
-        if mode not in (OPENING_AUTO, OPENING_AUTO_DRAW):
+        if not self.build_ele.DetectOpenings.value:
             return []
 
         minimum = self.build_ele.MinOpeningSize.value
@@ -671,7 +723,7 @@ class SlabReinforcementScript(BaseScriptObject):
 
         self.contour = [(x1 + nx, y1 + ny), (x2 + nx, y2 + ny),
                         (x2 - nx, y2 - ny), (x1 - nx, y1 - ny)]
-        self.openings = []
+        self.detected_openings = []
 
 
     def _read_element_thickness_and_level(self, element):
@@ -790,11 +842,11 @@ class SlabReinforcement():
         self.layers = self._create_layer_configs()
 
         # ---------- Aussparungen ----------
-        self.opening_mode = build_ele.OpeningMode.value
-
         # Rechteckmodus mit Zahlen-Eingabe: eine achsparallele Öffnung, die
         # über die Bandlogik läuft (schnellster Weg für den Standardfall)
-        self.has_opening = (self.opening_mode == OPENING_RECT and self.contour is None)
+        self.has_opening = (build_ele.RectOpeningActive.value
+                            and self.contour is None
+                            and not self.contour_openings)
         self.opening_x = (build_ele.OpeningX.value,
                           build_ele.OpeningX.value + build_ele.OpeningWidth.value)
         self.opening_y = (build_ele.OpeningY.value,
@@ -803,9 +855,6 @@ class SlabReinforcement():
         if self.has_opening and (build_ele.OpeningWidth.value <= 0 or build_ele.OpeningHeight.value <= 0):
             print('SlabReinforcement: Aussparung mit Breite/Höhe <= 0 wird ignoriert')
             self.has_opening = False
-
-        if self.opening_mode == OPENING_NONE:
-            self.contour_openings = []
 
         # Polygonale Aussparungen im Rechteckmodus: die Bandlogik kennt nur
         # achsparallele Rechtecke, deshalb wird die Rechteckplatte hier zur
@@ -816,16 +865,16 @@ class SlabReinforcement():
             print('SlabReinforcement: polygonale Aussparung im Rechteckmodus — '
                   'die Platte wird als Kontur verlegt')
 
-        if self.opening_mode == OPENING_RECT and self.contour is not None \
-                and not self.contour_openings:
-            # Kontur-/Elementmodus mit Zahlen-Eingabe: das Rechteck wird als
-            # gewöhnliches Öffnungspolygon behandelt
+        if build_ele.RectOpeningActive.value and not self.has_opening:
+            # Überall sonst wird das Zahlen-Rechteck als gewöhnliches
+            # Aussparungspolygon behandelt und einfach mit angehängt
             x_from, x_to = self.opening_x
             y_from, y_to = self.opening_y
 
             if x_to > x_from and y_to > y_from:
-                self.contour_openings = [[(x_from, y_from), (x_to, y_from),
-                                          (x_to, y_to), (x_from, y_to)]]
+                self.contour_openings = list(self.contour_openings) + \
+                    [[(x_from, y_from), (x_to, y_from),
+                      (x_to, y_to), (x_from, y_to)]]
 
 
     def _pnt(self, x: float, y: float, z: float = 0.0) -> AllplanGeo.Point3D:

@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.5.2</Version>
+    <Version>0.6.0</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -402,11 +402,28 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>OpeningMode</Name>
-            <Text>Ermittlung</Text>
-            <Value>Automatisch erkennen</Value>
-            <ValueList>Automatisch erkennen|Polygon einzeichnen|Automatisch + Polygon|Rechteck (Eingabe)|Keine</ValueList>
-            <ValueType>StringComboBox</ValueType>
+            <Name>AddOpeningButton</Name>
+            <Text>Aussparung zeichnen (hinzufügen)</Text>
+            <EventId>1001</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>RemoveLastOpeningButton</Name>
+            <Text>Letzte gezeichnete entfernen</Text>
+            <EventId>1002</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>ClearOpeningsButton</Name>
+            <Text>Alle gezeichneten entfernen</Text>
+            <EventId>1003</EventId>
+            <ValueType>Button</ValueType>
+          </Parameter>
+          <Parameter>
+            <Name>DetectOpenings</Name>
+            <Text>Vorhandene automatisch erkennen</Text>
+            <Value>True</Value>
+            <ValueType>CheckBox</ValueType>
           </Parameter>
           <Parameter>
             <Name>MinOpeningSize</Name>
@@ -414,22 +431,28 @@
             <Value>150</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
-            <Visible>OpeningMode != "Keine"</Visible>
+            <Visible>DetectOpenings</Visible>
           </Parameter>
         </Parameters>
       </Parameter>
       <Parameter>
         <Name>OpeningExpander</Name>
-        <Text>Rechteckige Aussparung (Eingabe)</Text>
+        <Text>Rechteckige Aussparung (Zahleneingabe)</Text>
         <ValueType>Expander</ValueType>
-        <Visible>OpeningMode == "Rechteck (Eingabe)"</Visible>
         <Parameters>
+          <Parameter>
+            <Name>RectOpeningActive</Name>
+            <Text>Zusätzliche Aussparung aus Zahlen</Text>
+            <Value>False</Value>
+            <ValueType>CheckBox</ValueType>
+          </Parameter>
           <Parameter>
             <Name>OpeningX</Name>
             <Text>Abstand X vom Plattenursprung</Text>
             <Value>1500</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>RectOpeningActive</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningY</Name>
@@ -437,6 +460,7 @@
             <Value>1200</Value>
             <MinValue>0</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>RectOpeningActive</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningWidth</Name>
@@ -444,6 +468,7 @@
             <Value>800</Value>
             <MinValue>100</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>RectOpeningActive</Visible>
           </Parameter>
           <Parameter>
             <Name>OpeningHeight</Name>
@@ -451,6 +476,7 @@
             <Value>1000</Value>
             <MinValue>100</MinValue>
             <ValueType>Length</ValueType>
+            <Visible>RectOpeningActive</Visible>
           </Parameter>
         </Parameters>
       </Parameter>
@@ -458,7 +484,6 @@
         <Name>EdgeReinfExpander</Name>
         <Text>Randverstärkung Aussparung</Text>
         <ValueType>Expander</ValueType>
-        <Visible>OpeningMode != "Keine"</Visible>
         <Parameters>
           <Parameter>
             <Name>EdgeReinfActive</Name>
@@ -504,7 +529,6 @@
         <Name>OpeningStirrupExpander</Name>
         <Text>Randbügel Aussparung</Text>
         <ValueType>Expander</ValueType>
-        <Visible>OpeningMode != "Keine"</Visible>
         <Parameters>
           <Parameter>
             <Name>OpeningStirrupStyle</Name>
@@ -527,7 +551,6 @@
         <Name>DiagonalExpander</Name>
         <Text>Diagonalzulagen an den Ecken</Text>
         <ValueType>Expander</ValueType>
-        <Visible>OpeningMode != "Keine"</Visible>
         <Parameters>
           <Parameter>
             <Name>DiagonalActive</Name>

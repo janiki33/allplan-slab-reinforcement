@@ -16,8 +16,9 @@ keine Kopie kommerzieller Plugins.
 | v0.3 | ScriptObject-Struktur mit drei Eingabemodi (Rechteck-Drag / Polygon zeichnen / Element wählen), Scanline-Verlegung für polygonale Konturen, mehrere Öffnungen, Randverdichtung via `calculate_length_of_regions` | umgesetzt |
 | v0.3.3 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
 | v0.4 | Verlegekonzept über Rechteckzerlegung (Rechtecke je Lage, Stoss an jeder Verlegungsgrenze, Abtreppung am längsten Stab), Randbügel und Anschlusseisen auch im Polygon-/Elementmodus | umgesetzt |
-| v0.5 | Aussparungs-Werkzeug: automatisch erkennen / Polygon einzeichnen / Rechteck-Eingabe, Rand- und Diagonalzulagen um beliebige Aussparungspolygone | umgesetzt |
-| v0.6 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
+| v0.5 | Aussparungs-Werkzeug: Rand-, Diagonal- und Bügelzulagen um beliebige Aussparungspolygone, Erkennung der Aussparungselemente ohne Antippen | umgesetzt |
+| v0.6 | Aussparungen werden über Palettenbuttons **hinzugefügt** statt vorab festgelegt: beliebig viele, jederzeit, einzeln wieder entfernbar | umgesetzt |
+| v0.7 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
 Original-Beispiele entwickelt und je Ausbaustufe von einem unabhängigen
@@ -424,16 +425,24 @@ Daraus folgt weiter:
 
 ## Aussparungen
 
-Aussparungen sind ein eigenes Werkzeug mit drei Quellen — einstellbar über
-**`OpeningMode`** auf der Palettenseite *Aussparungen*:
+Aussparungen sind **keine Voreinstellung**, die vor der Eingabe
+feststeht, sondern werden nach und nach hinzugefügt. Auf der
+Palettenseite *Aussparungen*:
 
-| Modus | Woher die Aussparungen kommen |
+| Bedienelement | Wirkung |
 | --- | --- |
-| **Automatisch erkennen** (Default) | Alle Innenkonturen der Eingabe. Beim Elementmodus sind das die Aussparungen der gewählten Decke bzw. des Fundaments, beim Polygonmodus jedes gezeichnete Polygon ausser dem flächengrössten. |
-| **Polygon einzeichnen** | Nach der Kontureingabe folgt eine **zweite Eingaberunde**: beliebig viele Aussparungspolygone werden gezeichnet, ESC beendet sie. Funktioniert in allen drei Eingabemodi, auch beim Rechteck-Drag. |
-| **Automatisch + Polygon** | Erkannte Innenkonturen **und** zusätzlich gezeichnete. |
-| **Rechteck (Eingabe)** | Die klassische Zahlen-Eingabe (X/Y/Breite/Länge). |
-| **Keine** | Aussparungen werden ignoriert, die Stäbe laufen durch. |
+| **Aussparung zeichnen (hinzufügen)** | Startet jederzeit eine weitere Eingaberunde. Beliebig viele Polygone zeichnen, ESC beendet die Runde; das Ergebnis wird an die Liste **angehängt**. Beliebig oft wiederholbar, in allen drei Eingabemodi. Die bereits erzeugte Bewehrung bleibt während des Zeichnens sichtbar. |
+| **Letzte gezeichnete entfernen** | Nimmt die zuletzt hinzugefügte Aussparung wieder heraus. |
+| **Alle gezeichneten entfernen** | Leert die Liste der gezeichneten Aussparungen; die automatisch erkannten bleiben. |
+| **Vorhandene automatisch erkennen** | Innenkonturen der Eingabe und Aussparungselemente der gewählten Decke. Jederzeit ein-/ausschaltbar, ohne die Eingabe zu wiederholen. |
+| *Rechteckige Aussparung (Zahleneingabe)* | Optional zusätzlich eine Aussparung über X/Y/Breite/Länge. |
+
+Technisch sind das Palettenbuttons (`<ValueType>Button</ValueType>` mit
+`<EventId>`), die im Skript in `on_control_event(event_id) -> bool`
+landen — der Rückgabewert baut die Palette neu auf
+([Button-Parameter](https://pythonparts.allplan.com/2024/manual/key_components/palette/parameters/parameter_with_button/)).
+Erkannte und gezeichnete Aussparungen werden getrennt gehalten: die
+erkannten ermittelt jede Neueingabe neu, die gezeichneten sammeln sich an.
 
 `MinOpeningSize` (Default 150 mm) filtert automatisch erkannte
 Innenkonturen: alles, dessen kleinere Seite darunter liegt, ist in der
