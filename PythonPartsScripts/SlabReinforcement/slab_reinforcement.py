@@ -135,6 +135,7 @@ apply_boundary_laps = _contour_placement.apply_boundary_laps
 loop_area = _contour_placement.loop_area
 loop_bbox = _contour_placement.loop_bbox
 split_closed_loops = _contour_placement.split_closed_loops
+connection_bar_endpoints = _contour_placement.connection_bar_endpoints
 LONGEST = _contour_placement.LONGEST
 SHORTEST = _contour_placement.SHORTEST
 
@@ -2473,7 +2474,6 @@ class SlabReinforcement():
         # Der Stab steht je zur Hälfte in und ausserhalb der Platte; die
         # Verlegelinie liegt deshalb um die Deckung zurück auf der Kante
         ix, iy = math.cos(math.radians(inward)), math.sin(math.radians(inward))
-        back = self.concrete_cover
 
         bar = LayerConfig(f'Separates Anschlusseisen {layer.direction}',
                           layer.direction, layer.is_top, layer.diameter,
@@ -2484,9 +2484,10 @@ class SlabReinforcement():
 
         shape = self._create_straight_bar_shape(bar, 2 * lap, 0.0, 0.0)
 
-        # Stabanfang: von der Kante aus lap nach aussen
-        start = (from_2d[0] - ix * back - ix * lap, from_2d[1] - iy * back - iy * lap)
-        end = (to_2d[0] - ix * back - ix * lap, to_2d[1] - iy * back - iy * lap)
+        run_axis = 0 if layer.direction == 'X' else 1
+
+        start, end = connection_bar_endpoints(from_2d, to_2d, (ix, iy), run_axis,
+                                              lap, self.concrete_cover)
 
         placement = LinearBarBuilder.create_linear_bar_placement_from_to_by_dist(
             self._next_position(), shape,

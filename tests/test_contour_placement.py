@@ -9,7 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScri
 
 from contour_placement import (LONGEST, SHORTEST, _round_outward,
                                bar_parallel_breaks,
-                               compute_contour_bars, decompose_into_zones,
+                               compute_contour_bars, connection_bar_endpoints,
+                               decompose_into_zones,
                                edge_setback, group_bars_into_runs,
                                group_bars_into_steps, loop_area, loop_bbox,
                                parallel_edges, scan_positions,
@@ -609,6 +610,77 @@ class ParallelEdgeCoverTest(unittest.TestCase):
         self.assertAlmostEqual(with_filter[0].position, 30.0)
         self.assertAlmostEqual(with_filter[-1].position, 3970.0)
 
+
+
+
+class TestConnectionBarEndpoints(unittest.TestCase):
+    """Separates Anschlusseisen: Eisenmitte muss auf der Kante liegen,
+    unabhängig davon, auf welcher Seite der Platte die Kante liegt (siehe
+    Regression: die Innennormale kehrt zwischen "positiver" und "negativer"
+    Kante das Vorzeichen um, der feste Verlängerungsvektor der Lage nicht).
+    """
+
+    LENGTH, COVER, LAP = 5000.0, 30.0, 60.0
+
+    def _center(self, from_pnt, to_pnt, inward, run_axis):
+        start, end = connection_bar_endpoints(from_pnt, to_pnt, inward, run_axis,
+                                              self.LAP, self.COVER)
+
+        # Verlegelinie liegt fest auf einer Koordinate; run_axis waehlt, welche
+        coord = 0 if run_axis == 0 else 1
+
+        self.assertAlmostEqual(start[coord], end[coord])
+
+        # Der Stab wird ab dem errechneten Startpunkt fest um 2 x lap in
+        # +X bzw. +Y verlaengert -- Stabmitte = Start + lap
+        return start[coord] + self.LAP
+
+    def test_linke_kante_x_richtung(self):
+        # Verlegelinie bereits um COVER nach innen (ix=+1) versetzt, wie es
+        # der Aufrufer vor dem Aufruf tut
+        from_pnt = (self.COVER, 0.0)
+        to_pnt = (self.COVER, 4000.0)
+
+        center = self._center(from_pnt, to_pnt, (1.0, 0.0), run_axis=0)
+
+        self.assertAlmostEqual(center, 0.0)
+
+    def test_rechte_kante_x_richtung(self):
+        from_pnt = (self.LENGTH - self.COVER, 0.0)
+        to_pnt = (self.LENGTH - self.COVER, 4000.0)
+
+        center = self._center(from_pnt, to_pnt, (-1.0, 0.0), run_axis=0)
+
+        self.assertAlmostEqual(center, self.LENGTH)
+
+    def test_untere_kante_y_richtung(self):
+        from_pnt = (0.0, self.COVER)
+        to_pnt = (self.LENGTH, self.COVER)
+
+        center = self._center(from_pnt, to_pnt, (0.0, 1.0), run_axis=1)
+
+        self.assertAlmostEqual(center, 0.0)
+
+    def test_obere_kante_y_richtung(self):
+        width = 4000.0
+        from_pnt = (0.0, width - self.COVER)
+        to_pnt = (self.LENGTH, width - self.COVER)
+
+        center = self._center(from_pnt, to_pnt, (0.0, -1.0), run_axis=1)
+
+        self.assertAlmostEqual(center, width)
+
+    def test_entlang_der_kante_unveraendert(self):
+        # Die Koordinate laengs der Kante (nicht die Verlegerichtung) darf
+        # durch den lap-Rueckversatz nicht verschoben werden
+        from_pnt = (self.COVER, 123.4)
+        to_pnt = (self.COVER, 2345.6)
+
+        start, end = connection_bar_endpoints(from_pnt, to_pnt, (1.0, 0.0), 0,
+                                              self.LAP, self.COVER)
+
+        self.assertAlmostEqual(start[1], 123.4)
+        self.assertAlmostEqual(end[1], 2345.6)
 
 if __name__ == '__main__':
     unittest.main()

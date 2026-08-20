@@ -19,6 +19,7 @@ keine Kopie kommerzieller Plugins.
 | v0.5 | Aussparungs-Werkzeug: Rand-, Diagonal- und Bügelzulagen um beliebige Aussparungspolygone, Erkennung der Aussparungselemente ohne Antippen | umgesetzt |
 | v0.6 | Aussparungen werden über Palettenbuttons **hinzugefügt** statt vorab festgelegt: beliebig viele, jederzeit, einzeln wieder entfernbar | umgesetzt |
 | v0.7 | Neue Stoss-Systematik nach Bürostandard (14-Formen-Studienblatt): minimale Verlegungsanzahl, Fluchten, Passeisen-Grenze, eine Stosslinie je Abtreppung | umgesetzt |
+| Korrektur | Separates Anschlusseisen im Konturmodus: Vorzeichenfehler behoben, durch den der Stab an einer von zwei gegenüberliegenden Kantenseiten um 2 × Stoßlänge außerhalb der Platte statt mittig auf ihr lag | umgesetzt |
 | v0.8 | Auflagererkennung (Wände/Unterzüge) mit Anschlussbewehrung | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die

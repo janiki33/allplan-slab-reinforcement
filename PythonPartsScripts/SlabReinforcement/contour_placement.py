@@ -880,3 +880,38 @@ def apply_boundary_laps(zones: list[PlacementZone],
                                     [unified] * len(zone.positions)))
 
     return result
+
+
+def connection_bar_endpoints(from_pnt: tuple[float, float],
+                             to_pnt: tuple[float, float],
+                             inward: tuple[float, float],
+                             run_axis: int,
+                             lap: float,
+                             cover: float) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Endpunkte eines separaten Anschlusseisens (Kontur- oder Rechteckmodus).
+
+    `from_pnt`/`to_pnt` liegen auf der Verlegelinie, die der Aufrufer bereits
+    um `cover` entlang der Innennormalen `inward` von der wahren Kante weg
+    verschoben hat (dieselbe Linie wie für den Randbügel). Diese Funktion
+    macht den Deckungs-Versatz rückgängig und schiebt zusätzlich um `lap`
+    zurück in die feste Verlängerungsrichtung der Lage — +X für run_axis 0,
+    +Y für run_axis 1 — unabhängig davon, auf welcher Kantenseite der Stab
+    sitzt.
+
+    Der Stab selbst wird immer fest in +X bzw. +Y verlängert (siehe
+    `RotationAngles`, die nur von der Lagenrichtung abhängen, nicht von der
+    Kantenseite). Der Rückversatz um `lap` muss deshalb ebenfalls fest in
+    +X/+Y erfolgen statt über die Innennormale, deren Vorzeichen mit der
+    Kantenseite wechselt — sonst landet der Stab an der "negativen" Kante
+    um 2 x `lap` ausserhalb der Platte statt mittig auf ihr.
+    """
+
+    ix, iy = inward
+    run_ux, run_uy = (1.0, 0.0) if run_axis == 0 else (0.0, 1.0)
+
+    start = (from_pnt[0] - ix * cover - run_ux * lap,
+             from_pnt[1] - iy * cover - run_uy * lap)
+    end = (to_pnt[0] - ix * cover - run_ux * lap,
+           to_pnt[1] - iy * cover - run_uy * lap)
+
+    return start, end
