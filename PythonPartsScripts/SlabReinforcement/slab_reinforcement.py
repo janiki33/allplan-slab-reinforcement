@@ -160,7 +160,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.7.5'
+SCRIPT_VERSION = '0.7.6'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -253,6 +253,7 @@ class SlabReinforcementScript(BaseScriptObject):
         self.drawn_openings: list[list[tuple[float, float]]] = []
         self.z_offset = 0.0
         self.thickness_override: float | None = None
+        self._geometry_z: float | None = None
 
         # Solange False, liefert execute() ein leeres Ergebnis — sonst würde
         # während der Eingabe bereits eine Platte am Nullpunkt erscheinen
@@ -644,6 +645,16 @@ class SlabReinforcementScript(BaseScriptObject):
             points = [(p.X, p.Y) for p in geometry.Points]
             self._set_contour_from_loops(split_closed_loops(points))
 
+            # Z der Konturpunkte merken: die gebaute Geometrie ist die
+            # verlässlichste Höhenquelle — sie stimmt auch dann, wenn die
+            # Platte über Ebenenhöhen statt absoluter Koten definiert ist
+            try:
+                zs = [float(p.Z) for p in geometry.Points if hasattr(p, 'Z')]
+            except Exception:                          # noqa: BLE001
+                zs = []
+
+            self._geometry_z = min(zs) if zs else None
+
             # Aussparungen sind in Allplan eigene Kindelemente der Decke —
             # sie stecken nicht in deren Konturpolygon und müssen deshalb
             # zusätzlich gelesen werden. Ohne sie anzutippen.
@@ -842,11 +853,47 @@ class SlabReinforcementScript(BaseScriptObject):
             print('SlabReinforcement: Dicke nicht aus dem Element lesbar — '
                   'Palettenwert wird verwendet')
 
+        # Höhenlage mehrstufig: (1) Z der gebauten Geometrie — stimmt auch
+        # bei Platten, die über Ebenenhöhen statt absoluter Koten definiert
+        # sind; (2) Ebenenbezug; (3) direkte Höhenattribute. Die Quelle
+        # steht im Trace-Fenster, damit eine falsche Höhe sofort ihrem
+        # Leseweg zugeordnet werden kann.
         try:
-            self.z_offset = properties.PlaneReferences.GetAbsBottomElevation()
-        except AttributeError:
+            plane_z = float(properties.PlaneReferences.GetAbsBottomElevation())
+        except Exception:                              # noqa: BLE001
+            plane_z = None
+
+        geometry_z = self._geometry_z
+        source = None
+
+        if geometry_z is not None and abs(geometry_z) > 0.01 and \
+                (plane_z is None or abs(plane_z - geometry_z) > 1.0):
+            # Die gebaute Geometrie trägt eine echte Höhe und widerspricht
+            # dem Ebenenbezug (oder er ist nicht lesbar): die Geometrie ist
+            # das, was wirklich im Modell steht — sie gewinnt
+            self.z_offset = geometry_z
+            source = 'Geometrie (min Z der Konturpunkte)'
+        elif plane_z is not None:
+            self.z_offset = plane_z
+            source = 'PlaneReferences.GetAbsBottomElevation'
+        elif geometry_z is not None:
+            self.z_offset = geometry_z
+            source = 'Geometrie (min Z der Konturpunkte)'
+
+        if source is None:
+            for name in ('AbsBottomElevation', 'BottomElevation'):
+                value = getattr(properties, name, None)
+                if value is not None:
+                    self.z_offset = float(value)
+                    source = f'Properties.{name}'
+                    break
+
+        if source is None:
             print('SlabReinforcement: Höhenlage nicht aus dem Element lesbar — '
                   'Bewehrung wird auf z=0 aufgebaut')
+        else:
+            print(f'SlabReinforcement: Unterkante Decke z={self.z_offset:.1f} '
+                  f'(Quelle: {source})')
 
 
 class SlabReinforcement():
@@ -2545,6 +2592,8 @@ class SlabReinforcement():
             min_bar=min_bar_length,
             flucht_min_share=self.flucht_min_share)
 
+        self._audit_cover(layer, bars, groups)
+
         placements: list[AllplanReinf.BarPlacement] = []
 
         for positions, piece in groups:
@@ -2554,6 +2603,55 @@ class SlabReinforcement():
         layer.placements = placements
 
         return placements
+
+
+    def _audit_cover(self, layer: LayerConfig, bars, groups):
+        """Deckungs-Audit: jedes verlegte Stück muss innerhalb der
+        Netto-Segmente seiner Bahnen liegen (dort ist die Deckung samt
+        Hilfsparallelen bereits abgezogen). Einzige zulässige Ausnahme ist
+        der Überstand einer Abtreppung, die am längsten Stab vermessen ist
+        (StepMaxLoss + Längenraster). Verstösse stehen beziffert im
+        Trace-Fenster — 'greift nicht' wird damit nachprüfbar.
+        """
+
+        segments_at = {bar.position: bar.segments for bar in bars}
+        step_allowance = self.step_max_loss + self.step_length_raster + 1.0
+
+        violations = []
+
+        for positions, piece in groups:
+            for pos in positions:
+                segs = segments_at.get(pos, ())
+
+                best = None
+                for seg in segs:
+                    overlap = min(piece[1], seg[1]) - max(piece[0], seg[0])
+                    if best is None or overlap > best[0]:
+                        best = (overlap, seg)
+
+                if best is None:
+                    violations.append((pos, piece, None, None))
+                    continue
+
+                seg = best[1]
+                under = seg[0] - piece[0]
+                over = piece[1] - seg[1]
+
+                if under > 1.0 or over > step_allowance:
+                    violations.append((pos, piece, round(max(under, 0), 1),
+                                       round(max(over, 0), 1)))
+
+        if not violations:
+            print(f'SlabReinforcement: Deckungs-Audit {layer.name}: ok '
+                  f'({len(groups)} Verlegungen)')
+            return
+
+        print(f'SlabReinforcement: Deckungs-Audit {layer.name}: '
+              f'{len(violations)} VERSTÖSSE — erste Fälle:')
+
+        for pos, piece, under, over in violations[:5]:
+            print(f'    Scan {pos:.0f}: Stück {piece[0]:.0f}..{piece[1]:.0f} '
+                  f'ragt {under}/{over} mm über das Netto-Segment hinaus')
 
 
 
