@@ -12,7 +12,7 @@ keine Kopie kommerzieller Plugins.
 |---|---|---|
 | v0.1 | Rechteckplatte, 4 Lagen (Ø, Abstand, Deckung, Stahlgüte je Lage), Palette, Live-Vorschau, PythonPart-Erzeugung | umgesetzt |
 | v0.2 | Rechteckige Öffnung: Kappen der Hauptstäbe, umlaufende Randverstärkung mit konfigurierbarer Übergreifungslänge | umgesetzt |
-| v0.2.1 | Randausbildung je Kante (U-Randbügel / Anschlusseisen / separate Anschlusseisen / keine), Stoßfaktor, „Alle Lagen gleich", wählbare äußere Lagenrichtung, Allplan-Layer je Lage, Handles | umgesetzt |
+| v0.2.1 | Randausbildung je Kante (U-Randbügel / Anschlusseisen / separate Anschlusseisen / keine), Stoßfaktor, „Alle Lagen gleich", wählbares Lagenschema, Allplan-Layer je Lage, Handles | umgesetzt |
 | v0.3 | ScriptObject-Struktur mit drei Eingabemodi (Rechteck-Drag / Polygon zeichnen / Element wählen), Scanline-Verlegung für polygonale Konturen, mehrere Öffnungen, Randverdichtung via `calculate_length_of_regions` | umgesetzt |
 | v0.3.3 | Elemente werden direkt abgesetzt (nicht mehr an den Zeiger gebunden), Überdeckungsmodell aus den Beispieldateien, automatische Stösse mit SIA-Versatz, Abtreppung an Schrägen, Deckung senkrecht zur Kante | umgesetzt |
 | v0.4 | Verlegekonzept über Rechteckzerlegung (Rechtecke je Lage, Stoss an jeder Verlegungsgrenze, Abtreppung am längsten Stab), Randbügel und Anschlusseisen auch im Polygon-/Elementmodus | umgesetzt |
@@ -38,6 +38,7 @@ getestet. Beim ersten Live-Test gezielt prüfen:
 
 ```
 Library/SlabReinforcement/SlabReinforcement.pyp      Palettendefinition (UI)
+Library/SlabReinforcement/layers_outer_*.png         Bilder der beiden Lagenschemata (Palettenauswahl)
 PythonPartsScripts/SlabReinforcement/                Python-Paket (Ordner = Modul)
     __init__.py                                      stellt check_allplan_version/create_script_object bereit
     slab_reinforcement.py                            ScriptObject (Eingabemodi) + Placement-Engine
@@ -301,6 +302,20 @@ verifiziert.
 
 Bei jeder Parameteränderung ruft Allplan `create_element` neu auf —
 das ist die übliche Live-Vorschau von Standard-PythonParts.
+
+### Lagenschema
+
+Statt einer Textauswahl „äussere Lagen X/Y" wird das Schema als **Bild**
+gewählt (`LayerScheme`, `PictureButtonList` mit den beiden PNG neben der
+`.pyp`). Durchgezogen = untere Lagen, gestrichelt = obere:
+
+| Bild | Bedeutung |
+| --- | --- |
+| `layers_outer_y.png` | 1. Lage senkrecht, 2. waagrecht, 3. waagrecht, 4. senkrecht → **äussere Lagen in Y** |
+| `layers_outer_x.png` | 1. Lage waagrecht, 2. senkrecht, 3. senkrecht, 4. waagrecht → **äussere Lagen in X** |
+
+Die Bildpfade in `<ValueList2>` sind relativ zur `.pyp`
+([PictureButtonList / PictureComboBox](https://github.com/NemetschekAllplan/PythonPartsExamples/blob/main/Library/Examples/PythonParts/PaletteExamples/BasicControls/PictureComboBox.pyp)).
 
 ### Betondeckung und Höhenlagen
 

@@ -159,7 +159,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.7.4'
+SCRIPT_VERSION = '0.7.5'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -183,6 +183,10 @@ EVENT_CLEAR_OPENINGS = 1003
 
 # Eingabestadium "Aussparung zeichnen"
 OPENING_STAGE = 1
+
+# Lagenschema (Palette: LayerScheme, Bildauswahl)
+LAYER_SCHEME_OUTER_Y = 1     # 1./4. Lage senkrecht -> äussere Lagen in Y
+LAYER_SCHEME_OUTER_X = 2     # 1./4. Lage waagrecht -> äussere Lagen in X
 
 
 def check_allplan_version(_build_ele: BuildingElement,
@@ -1033,17 +1037,18 @@ class SlabReinforcement():
         # liegt direkt auf bzw. unter der Betondeckung, die innere darüber
         # bzw. darunter. Eine einzige Betondeckung gilt für alle Lagen und
         # für die Stabenden (Seitendeckung).
-        # Auf den Anfangsbuchstaben pruefen statt auf den vollen Text: sonst
-        # landet jede geaenderte Beschriftung stillschweigend im Else-Zweig,
-        # und der Umschalter wirkt scheinbar gar nicht
-        outer_direction = 'X' if str(build_ele.OuterLayerDirection.value).strip().upper().startswith('X') \
+        # Lagenschema aus der Bildauswahl: Schema 1 = 1./4. Lage senkrecht
+        # (äussere Lagen in Y), Schema 2 = 1./4. Lage waagrecht (in X).
+        # Die Bilder zeigen genau diese Nummerierung, durchgezogen = untere,
+        # gestrichelt = obere Lagen.
+        outer_direction = 'X' if int(build_ele.LayerScheme.value) == LAYER_SCHEME_OUTER_X \
             else 'Y'
 
         # Im Trace-Fenster nachvollziehbar, welche Richtung tatsaechlich
         # aussen liegt — der Hoehenunterschied betraegt nur einen
         # Stabdurchmesser und ist in der Draufsicht nicht zu sehen
-        print(f'SlabReinforcement: äußere Lagen in {outer_direction}-Richtung '
-              f'(Palettenwert "{build_ele.OuterLayerDirection.value}")')
+        print(f'SlabReinforcement: Lagenschema {build_ele.LayerScheme.value} — '
+              f'1./4. Lage in {outer_direction}-Richtung (äussere Lagen)')
 
         if outer_direction == 'X':
             bottom_outer, bottom_inner = bottom_x, bottom_y

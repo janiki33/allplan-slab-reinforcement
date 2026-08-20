@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.7.4</Version>
+    <Version>0.7.5</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -72,11 +72,13 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>OuterLayerDirection</Name>
-            <Text>Äußere Lagen</Text>
-            <Value>X-Richtung</Value>
-            <ValueList>X-Richtung|Y-Richtung</ValueList>
-            <ValueType>StringComboBox</ValueType>
+            <Name>LayerScheme</Name>
+            <Text>Lagenschema</Text>
+            <Value>1</Value>
+            <ValueList>1|2</ValueList>
+            <ValueTextList>1./4. Lage senkrecht (äussere Lagen in Y)|1./4. Lage waagrecht (äussere Lagen in X)</ValueTextList>
+            <ValueList2>layers_outer_y.png|layers_outer_x.png</ValueList2>
+            <ValueType>PictureButtonList</ValueType>
           </Parameter>
           <Parameter>
             <Name>EdgeZonesActive</Name>
