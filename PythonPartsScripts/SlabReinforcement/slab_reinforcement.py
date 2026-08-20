@@ -628,7 +628,19 @@ class SlabReinforcement():
         # für die Stabenden (Seitendeckung).
         cover = self.concrete_cover
 
-        if build_ele.OuterLayerDirection.value == 'X-Richtung':
+        # Auf den Anfangsbuchstaben pruefen statt auf den vollen Text: sonst
+        # landet jede geaenderte Beschriftung stillschweigend im Else-Zweig,
+        # und der Umschalter wirkt scheinbar gar nicht
+        outer_direction = 'X' if str(build_ele.OuterLayerDirection.value).strip().upper().startswith('X') \
+            else 'Y'
+
+        # Im Trace-Fenster nachvollziehbar, welche Richtung tatsaechlich
+        # aussen liegt — der Hoehenunterschied betraegt nur einen
+        # Stabdurchmesser und ist in der Draufsicht nicht zu sehen
+        print(f'SlabReinforcement: äußere Lagen in {outer_direction}-Richtung '
+              f'(Palettenwert "{build_ele.OuterLayerDirection.value}")')
+
+        if outer_direction == 'X':
             bottom_outer, bottom_inner = bottom_x, bottom_y
             top_outer, top_inner = top_x, top_y
         else:
