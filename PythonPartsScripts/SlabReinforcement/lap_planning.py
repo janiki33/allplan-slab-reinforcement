@@ -469,7 +469,30 @@ def plan_layer(bars,
             groups += _step_groups(region, line_start, lap, step_deviation,
                                    raster, side='start')
 
-    return _merge_singletons(_merge_equal_groups(groups))
+    return _enforce_uniform_runs(_merge_singletons(_merge_equal_groups(groups)))
+
+
+def _enforce_uniform_runs(groups: list[PlacementGroup],
+                          tol: float = 1.0) -> list[PlacementGroup]:
+    """Harte Schlussprüfung: eine Verlegung wird in Allplan als
+    Anzahl x konstanter Abstand abgesetzt — jede Gruppe muss deshalb
+    strikt äquidistant und frei von Doppelpositionen sein. Was es nicht
+    ist, wird hier aufgetrennt statt still verrutscht zu werden."""
+
+    result: list[PlacementGroup] = []
+
+    for group in groups:
+        positions = sorted(group.positions)
+        unique = [positions[0]]
+
+        for pos in positions[1:]:
+            if pos - unique[-1] > tol:
+                unique.append(pos)
+
+        for run in _split_by_spacing(unique, tol):
+            result.append(PlacementGroup(run, group.piece))
+
+    return result
 
 
 def _merge_equal_groups(groups: list[PlacementGroup],
@@ -644,10 +667,14 @@ def _merge_singletons(groups: list[PlacementGroup]) -> list[PlacementGroup]:
                 covers = other.piece[0] <= group.piece[0] + 1e-6 and \
                     other.piece[1] >= group.piece[1] - 1e-6
 
-                # Auch der Randstab am Ende eines Laufs (kleinerer Abstand
-                # als das Raster) wird übernommen — wie bisher rückt er
-                # dabei auf das Verlegeraster
-                if covers and gap <= spacing + 1.0:
+                # Nur rasterecht zusammenlegen: die Verlegung wird in
+                # Allplan als Anzahl x konstanter Abstand abgesetzt — eine
+                # Position ausserhalb des Rasters (oder doppelt) liesse
+                # real Staebe verrutschen bzw. verschwinden
+                on_grid = spacing > 0 and abs(gap - spacing) <= 1.0
+                duplicate = any(abs(pos - p) <= 1.0 for p in other.positions)
+
+                if covers and on_grid and not duplicate:
                     merged_positions = sorted(other.positions + [pos])
                     result[j] = PlacementGroup(merged_positions, other.piece)
                     del result[i]

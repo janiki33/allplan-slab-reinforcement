@@ -94,22 +94,41 @@ class RectanglePlanTest(unittest.TestCase):
         contour = [(0, 0), (14000, 0), (14000, 6000), (0, 6000)]
         bars, groups = plan(contour)
 
-        # Eine linke und eine rechte Verlegung über alle Bahnen
-        self.assertEqual(len(groups), 2)
+        # Links/rechts je eine Hauptverlegung; der Randstab am Ende des
+        # Scanrasters (kleinerer Abstand) wird als eigene Exakt-Verlegung
+        # geführt statt aufs Raster verschoben zu werden
+        self.assertEqual(len(groups), 4)
 
-        left, right = sorted(groups, key=lambda g: g.piece)
-        self.assertEqual(len(left.positions), len(bars))
-        self.assertAlmostEqual(left.piece[1] - right.piece[0], 600.0, places=6)
+        mains = sorted((g for g in groups if len(g.positions) > 1),
+                       key=lambda g: g.piece)
+        self.assertEqual(len(mains), 2)
+        self.assertEqual(len(mains[0].positions), len(bars) - 1)
+        self.assertAlmostEqual(mains[0].piece[1] - mains[1].piece[0], 600.0,
+                               places=6)
         mid = (30 + 13970) / 2
-        self.assertAlmostEqual(left.piece[1], mid + 300, places=6)
+        self.assertAlmostEqual(mains[0].piece[1], mid + 300, places=6)
+
+        # Jede Bahn ist genau einmal je Stück belegt
+        for piece_group in (mains[0], mains[1]):
+            singles = [g for g in groups if len(g.positions) == 1
+                       and g.piece == piece_group.piece]
+            self.assertEqual(len(piece_group.positions) + len(singles),
+                             len(bars))
 
     def test_form6_thirds(self):
         contour = [(0, 0), (21000, 0), (21000, 4500), (0, 4500)]
         bars, groups = plan(contour)
 
-        self.assertEqual(len(groups), 3)
+        pieces = {g.piece for g in groups}
+        self.assertEqual(len(pieces), 3)      # gedrittelt
+
         for g in groups:
             self.assertLessEqual(g.piece[1] - g.piece[0], 8000 + 1e-6)
+
+        # je Stück: Hauptlauf + exakter Randstab decken alle Bahnen ab
+        for piece in pieces:
+            total = sum(len(g.positions) for g in groups if g.piece == piece)
+            self.assertEqual(total, len(bars))
 
     def test_no_lap_below_pass_threshold(self):
         contour = [(0, 0), (2500, 0), (2500, 4000), (0, 4000)]
@@ -292,10 +311,12 @@ class FluchtShareTest(unittest.TestCase):
         self.assertEqual(full[-1], op1_row[-1])
         self.assertEqual(full[-2], op1_row[-2])
 
-        # und als eine Verlegung über alle Bahnen zusammengelegt
+        # und über alle Bahnen zusammengelegt (Hauptlauf über die ganze
+        # Höhe plus der exakte Randstab am Scanende)
         big = [g for g in groups if g.piece == full[-1]]
-        self.assertEqual(len(big), 1)
-        self.assertEqual(len(big[0].positions), len(bars))
+        self.assertEqual(sum(len(g.positions) for g in big), len(bars))
+        self.assertGreaterEqual(max(len(g.positions) for g in big),
+                                len(bars) - 1)
 
     def test_y_columns_keep_the_plain_mid(self):
         """In Y gibt es keinen Anker: die freien Stücke neben der Zone
@@ -331,14 +352,77 @@ class FluchtShareTest(unittest.TestCase):
                          [6000, 8500])
 
 
+class UniformRunTest(unittest.TestCase):
+    """Jede Verlegung muss strikt äquidistant und doppelfrei sein — Allplan
+    setzt Anzahl x konstanter Abstand ab; alles andere verschiebt real
+    Stäbe (die 'fehlenden Eisen' unter der Aussparung)."""
+
+    CONTOUR = [(0, 0), (20510, 0), (20510, 15025), (0, 15025)]
+    OP2 = [(3250, 6030), (4850, 6030), (4850, 7780), (3250, 7780)]
+
+    def test_all_groups_equidistant_across_strip_scenarios(self):
+        # Aussparungs-Unterkante so schieben, dass Bahnen in den
+        # Sperrstreifen fallen (die 0.7.3-Regression)
+        for oy in range(9150, 9310, 15):
+            op1 = [(810, oy), (5045, oy), (5045, oy + 1190), (810, oy + 1190)]
+
+            for axis in (0, 1):
+                bars = compute_contour_bars(self.CONTOUR, [op1, self.OP2],
+                                            axis, 150.0, 40.0, 300.0,
+                                            dist_margin=46.0)
+                groups = plan_layer(bars, self.CONTOUR, [op1, self.OP2],
+                                    axis, **PARAMS)
+
+                for g in groups:
+                    for a, b in zip(g.positions, g.positions[1:]):
+                        self.assertGreater(b - a, 1.0)   # keine Doppelten
+
+                    if len(g.positions) >= 3:
+                        d0 = g.positions[1] - g.positions[0]
+                        for a, b in zip(g.positions, g.positions[1:]):
+                            self.assertAlmostEqual(b - a, d0, delta=1.0)
+
+    def test_every_bar_segment_stays_covered(self):
+        for oy in (9150, 9195, 9240):
+            op1 = [(810, oy), (5045, oy), (5045, oy + 1190), (810, oy + 1190)]
+            bars = compute_contour_bars(self.CONTOUR, [op1, self.OP2], 0,
+                                        150.0, 40.0, 300.0, dist_margin=46.0)
+            groups = plan_layer(bars, self.CONTOUR, [op1, self.OP2], 0, **PARAMS)
+
+            placed = {}
+            for g in groups:
+                for pos in g.positions:
+                    placed.setdefault(pos, []).append(g.piece)
+
+            for bar in bars:
+                pieces = sorted(placed.get(bar.position, []))
+
+                for seg in bar.segments:
+                    if seg[1] - seg[0] < 300:
+                        continue
+
+                    cur = seg[0]
+                    for piece in pieces:
+                        if piece[0] <= cur + 200.0:
+                            cur = max(cur, piece[1])
+
+                    self.assertGreaterEqual(cur, seg[1] - 200.0,
+                                            f'Lücke bei y={bar.position}')
+
+
 class NoSingletonTest(unittest.TestCase):
 
     def test_no_single_bar_groups_in_stepped_regions(self):
         contour = [(0, 0), (14000, 0), (14000, 2500), (8500, 8000), (0, 8000)]
         bars, groups = plan(contour)
 
+        # Stufenstücke nie als Einzelstab; der exakte Randstab am Ende des
+        # Scanrasters ist die zulässige Ausnahme (letzte Scan-Position)
+        last = max(b.position for b in bars)
+
         for g in groups:
-            self.assertGreater(len(g.positions), 1)
+            if len(g.positions) == 1:
+                self.assertAlmostEqual(g.positions[0], last, delta=1.0)
 
 
 if __name__ == '__main__':
