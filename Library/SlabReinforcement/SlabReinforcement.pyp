@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.8.5</Version>
+    <Version>0.8.6</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -72,40 +72,27 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>LayerOrder</Name>
+            <Name>LayerVariant</Name>
             <Text>Lagerichtung</Text>
-            <Value>2</Value>
-            <ValueType>RadioButtonGroup</ValueType>
-            <Parameters>
-              <Parameter>
-                <Name>LayerOrderY</Name>
-                <Text>Variante 1</Text>
-                <Value>1</Value>
-                <ValueType>RadioButton</ValueType>
-              </Parameter>
-              <Parameter>
-                <Name>LayerOrderX</Name>
-                <Text>Variante 2</Text>
-                <Value>2</Value>
-                <ValueType>RadioButton</ValueType>
-              </Parameter>
-            </Parameters>
+            <Value>Variante 2</Value>
+            <ValueList>Variante 1|Variante 2</ValueList>
+            <ValueType>StringComboBox</ValueType>
           </Parameter>
           <Parameter>
-            <Name>LayerOrderPicY</Name>
+            <Name>LayerVariantPic1</Name>
             <Text> </Text>
             <Value>layers_outer_y.png</Value>
             <Orientation>Middle</Orientation>
             <ValueType>Picture</ValueType>
-            <Visible>LayerOrder == 1</Visible>
+            <Visible>LayerVariant == "Variante 1"</Visible>
           </Parameter>
           <Parameter>
-            <Name>LayerOrderPicX</Name>
+            <Name>LayerVariantPic2</Name>
             <Text> </Text>
             <Value>layers_outer_x.png</Value>
             <Orientation>Middle</Orientation>
             <ValueType>Picture</ValueType>
-            <Visible>LayerOrder == 2</Visible>
+            <Visible>LayerVariant == "Variante 2"</Visible>
           </Parameter>
           <Parameter>
             <Name>EdgeZonesActive</Name>

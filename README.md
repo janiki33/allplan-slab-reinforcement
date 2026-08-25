@@ -336,30 +336,35 @@ das ist die übliche Live-Vorschau von Standard-PythonParts.
 
 ### Lagerichtung
 
-Statt einer Textauswahl „äussere Lagen X/Y" wird die Lagerichtung über
-eine **RadioButtonGroup** `LayerOrder` gewählt — „Variante 1" (Wert 1) und
-„Variante 2" (Wert 2); darunter zeigt ein `Picture`-Parameter die jeweils
-gewählte Variante gross an
-(`LayerOrderPicY` / `LayerOrderPicX`, umgeschaltet über `<Visible>`).
-Durchgezogen = untere Lagen, gestrichelt = obere:
+Die Lagerichtung wird über den Parameter **`LayerVariant`** gewählt —
+eine `StringComboBox` mit den Werten `Variante 1` und `Variante 2`.
+Darunter zeigt ein `Picture`-Parameter die gewählte Variante gross an
+(`LayerVariantPic1` / `LayerVariantPic2`, umgeschaltet über
+`<Visible>LayerVariant == "Variante 1"</Visible>`).
 
-| Bild | Bedeutung |
-| --- | --- |
-| `layers_outer_y.png` (Variante 1) | 1. Lage senkrecht, 2. waagrecht, 3. waagrecht, 4. senkrecht → **äussere Lagen in Y** |
-| `layers_outer_x.png` (Variante 2) | 1. Lage waagrecht, 2. senkrecht, 3. senkrecht, 4. waagrecht → **äussere Lagen in X** |
+| Variante | Bild | Bedeutung |
+| --- | --- | --- |
+| Variante 1 | `layers_outer_y.png` | 1. Lage senkrecht, 2. waagrecht, 3. waagrecht, 4. senkrecht → **1./4. Lage in Y** |
+| Variante 2 | `layers_outer_x.png` | 1. Lage waagrecht, 2. senkrecht, 3. senkrecht, 4. waagrecht → **1./4. Lage in X** |
 
-Die Bildpfade sind relativ zur `.pyp`
+Durchgezogen = untere Lagen, gestrichelt = obere. Die Bildpfade sind
+relativ zur `.pyp`
 ([Picture](https://pythonparts.allplan.com/2026/manual/key_components/palette/parameter_with_layout_control/)).
-Die Gruppenstruktur entspricht dem offiziellen Beispiel
-[RadioButtons.pyp](https://github.com/NemetschekAllplan/PythonPartsExamples/blob/main/Library/Examples/PythonParts/PaletteExamples/BasicControls/RadioButtons.pyp):
-die `RadioButton`-Kinder stehen in einem `<Parameters>`-Block innerhalb des
-`RadioButtonGroup`-Parameters, der zugleich der Werthalter ist.
 
-`PictureButtonList` war hier der falsche Steuerelementtyp — das ist eine
-Ereignis-Knopfleiste ohne Zustand, die Auswahl erreichte den Parameter nie.
-Der Parameter heisst bewusst `LayerOrder` und nicht mehr `LayerScheme`:
-wegen `<ReadLastInput>True</ReadLastInput>` würde sonst der gespeicherte
-Altwert aus der `PictureButtonList`-Zeit weiter greifen.
+Die Auswertung steckt in `layer_scheme.py` (`layer_scheme_value`,
+`outer_direction`) und ist ohne Allplan testbar — die Zuordnung war
+mehrfach die Ursache falsch herum liegender Lagen.
+
+**Warum nicht `PictureButtonList` oder `RadioButtonGroup`:**
+`PictureButtonList` ist eine Ereignis-Knopfleiste ohne Zustand, die
+Auswahl erreichte den Parameter nie. Eine `RadioButtonGroup` nach dem
+offiziellen Beispiel
+[RadioButtons.pyp](https://github.com/NemetschekAllplan/PythonPartsExamples/blob/main/Library/Examples/PythonParts/PaletteExamples/BasicControls/RadioButtons.pyp)
+griff in dieser Palette ebenfalls nicht. `StringComboBox` mit
+String-`<Visible>` ist hier nachweislich funktionierend (`InputMethod`),
+darum die Umstellung. Bei jedem Wechsel des Steuerelementtyps wird der
+Parameter umbenannt, weil `<ReadLastInput>True</ReadLastInput>` sonst
+den gespeicherten Altwert des alten Typs weiterreicht.
 
 ### Allplan-Layer der Hauptbewehrung
 

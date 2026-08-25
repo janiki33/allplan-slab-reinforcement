@@ -75,16 +75,16 @@ def _load_helper_modules():
 
     names = ('contour_placement', 'lap_splitting', 'opening_clipping',
              'opening_reinforcement', 'state_persistence', 'lap_planning',
-             'wall_connection')
+             'wall_connection', 'layer_scheme')
 
     try:
         from . import (contour_placement, lap_planning,          # noqa: F401
-                       lap_splitting, opening_clipping,
+                       lap_splitting, layer_scheme, opening_clipping,
                        opening_reinforcement, state_persistence,
                        wall_connection)
         return (contour_placement, lap_splitting, opening_clipping,
                 opening_reinforcement, state_persistence, lap_planning,
-                wall_connection)
+                wall_connection, layer_scheme)
     except Exception as relative_error:                # noqa: BLE001
         first_error = relative_error
 
@@ -133,7 +133,7 @@ def _load_helper_modules():
 
 (_contour_placement, _lap_splitting, _opening_clipping,
  _opening_reinforcement, _state_persistence, _lap_planning,
- _wall_connection) = _load_helper_modules()
+ _wall_connection, _layer_scheme) = _load_helper_modules()
 
 compute_contour_bars = _contour_placement.compute_contour_bars
 decompose_into_zones = _contour_placement.decompose_into_zones
@@ -169,7 +169,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.8.5'
+SCRIPT_VERSION = '0.8.6'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -198,29 +198,10 @@ EVENT_CLEAR_WALLS = 1006
 OPENING_STAGE = 1
 WALL_STAGE = 2
 
-# Lagenschema (Palette: LayerOrder, RadioButtonGroup + Vorschaubild)
-LAYER_SCHEME_OUTER_Y = 1     # 1./4. Lage senkrecht -> äussere Lagen in Y
-LAYER_SCHEME_OUTER_X = 2     # 1./4. Lage waagrecht -> äussere Lagen in X
-
-
-def layer_scheme_value(raw) -> int:
-    """Palettenwert des Lagenschemas robust auf 1 oder 2 abbilden.
-
-    Der RadioButtonGroup-Wert kann je nach Allplan-Version als int, float
-    oder str ankommen; ein unbekannter Wert (z. B. aus einem alten
-    gespeicherten Parametersatz) faellt auf das Standardschema zurueck,
-    statt eine Exception zu werfen.
-    """
-
-    try:
-        value = int(float(str(raw).strip()))
-    except (TypeError, ValueError):
-        return LAYER_SCHEME_OUTER_X
-
-    if value not in (LAYER_SCHEME_OUTER_Y, LAYER_SCHEME_OUTER_X):
-        return LAYER_SCHEME_OUTER_X
-
-    return value
+# Lagerichtung (Palette: LayerVariant, StringComboBox + Vorschaubild)
+LAYER_SCHEME_OUTER_Y = _layer_scheme.LAYER_SCHEME_OUTER_Y
+LAYER_SCHEME_OUTER_X = _layer_scheme.LAYER_SCHEME_OUTER_X
+layer_scheme_value = _layer_scheme.layer_scheme_value
 
 
 
@@ -1324,11 +1305,11 @@ class SlabReinforcement():
         # liegt direkt auf bzw. unter der Betondeckung, die innere darüber
         # bzw. darunter. Eine einzige Betondeckung gilt für alle Lagen und
         # für die Stabenden (Seitendeckung).
-        # Lagenschema aus der Bildauswahl: Schema 1 = 1./4. Lage senkrecht
-        # (äussere Lagen in Y), Schema 2 = 1./4. Lage waagrecht (in X).
-        # Die Bilder zeigen genau diese Nummerierung, durchgezogen = untere,
-        # gestrichelt = obere Lagen.
-        raw_scheme = build_ele.LayerOrder.value
+        # Lagerichtung aus der Palette: Variante 1 = 1./4. Lage senkrecht
+        # (äussere Lagen in Y), Variante 2 = 1./4. Lage waagrecht (in X).
+        # Die Vorschaubilder zeigen genau diese Nummerierung, durchgezogen
+        # = untere, gestrichelt = obere Lagen.
+        raw_scheme = build_ele.LayerVariant.value
         outer_direction = 'X' if layer_scheme_value(raw_scheme) == LAYER_SCHEME_OUTER_X \
             else 'Y'
 
