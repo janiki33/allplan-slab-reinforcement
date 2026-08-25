@@ -581,17 +581,28 @@ class SlabReinforcementScript(BaseScriptObject):
         # Bewehrung während der Auswahl sichtbar bleibt
         self.build_ele.InputMode.value = self.build_ele.INPUT_MODE_INPUT
 
-        # Auf Wandtypen filtern, soweit die Konstanten existieren — welche
-        # UUID-Namen die laufende Allplan-Version anbietet, ist nicht
-        # dokumentiert belegbar; ohne Treffer bleibt der Filter leer und
-        # jedes Element ist wählbar (der Grundriss-Leser sortiert dann aus)
+        # Beim Anklicken einer Wand trifft man ihre Schicht (Tier), nicht
+        # das Wand-Verbundelement — die offiziellen Auswahlbeispiele
+        # (WallGeometrySelection.py) filtern deshalb auf die Tier-Typen;
+        # Wall_TypeUUID zusätzlich, falls doch der Verbund getroffen wird
+        candidates = ('WallTier_TypeUUID', 'CircularWallTier_TypeUUID',
+                      'PolygonWallTier_TypeUUID', 'Wall_TypeUUID')
+
         wall_uuids = [getattr(AllplanEleAdapter, name)
-                      for name in ('Wall_TypeUUID', 'WallTier_TypeUUID',
-                                   'WallStraightTier_TypeUUID')
+                      for name in candidates
                       if hasattr(AllplanEleAdapter, name)]
 
+        missing = [name for name in candidates
+                   if not hasattr(AllplanEleAdapter, name)]
+
+        print(f'SlabReinforcement: Wandauswahl mit {len(wall_uuids)} Typfiltern'
+              + (f' (nicht vorhanden: {", ".join(missing)})' if missing else ''))
+
+        # Eine leere Liste hiesse "kein Typ erlaubt" — dann lieber ganz ohne
+        # Filter (None laut Doku = keine Einschränkung) und die Grundriss-
+        # Lesbarkeit entscheiden lassen
         self.script_object_interactor = SingleElementSelectInteractor(
-            self.wall_sel_result, wall_uuids,
+            self.wall_sel_result, wall_uuids if wall_uuids else None,
             'Wand wählen — ESC beendet die Auswahl')
 
         self.script_object_interactor.start_input(self.coord_input)
@@ -611,6 +622,21 @@ class SlabReinforcementScript(BaseScriptObject):
             return
 
         loops = self._loops_from_element(sel_element)
+
+        # Wurde das Wand-Verbundelement statt einer Schicht getroffen, trägt
+        # es selbst oft keine Punktgeometrie — dann die Grundrisse seiner
+        # Kindelemente (Schichten) einsammeln
+        if not loops:
+            service = getattr(AllplanEleAdapter,
+                              'BaseElementAdapterChildElementsService', None)
+
+            if service is not None and hasattr(service, 'GetChildModelElements'):
+                try:
+                    for child in service.GetChildModelElements(sel_element):
+                        loops += self._loops_from_element(child)
+                except Exception as error:             # noqa: BLE001
+                    print(f'SlabReinforcement: Wandschichten nicht lesbar '
+                          f'({error})')
 
         if not loops:
             print('SlabReinforcement: aus dem gewählten Element lässt sich '
