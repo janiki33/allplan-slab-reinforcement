@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.8.1</Version>
+    <Version>0.8.2</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -74,11 +74,36 @@
           <Parameter>
             <Name>LayerScheme</Name>
             <Text>Lagenschema</Text>
-            <Value>1</Value>
-            <ValueList>1|2</ValueList>
-            <ValueTextList>1./4. Lage senkrecht (äussere Lagen in Y)|1./4. Lage waagrecht (äussere Lagen in X)</ValueTextList>
-            <ValueList2>layers_outer_y.png|layers_outer_x.png</ValueList2>
-            <ValueType>PictureButtonList</ValueType>
+            <Value>2</Value>
+            <ValueType>RadioButtonGroup</ValueType>
+            <Parameters>
+              <Parameter>
+                <Name>LayerSchemeY</Name>
+                <Text>1./4. Lage senkrecht (äussere Lagen in Y)</Text>
+                <Value>1</Value>
+                <ValueType>RadioButton</ValueType>
+              </Parameter>
+              <Parameter>
+                <Name>LayerSchemeX</Name>
+                <Text>1./4. Lage waagrecht (äussere Lagen in X)</Text>
+                <Value>2</Value>
+                <ValueType>RadioButton</ValueType>
+              </Parameter>
+            </Parameters>
+          </Parameter>
+          <Parameter>
+            <Name>LayerSchemePicY</Name>
+            <Text> </Text>
+            <Value>layers_outer_y.png</Value>
+            <ValueType>Picture</ValueType>
+            <Visible>LayerScheme == 1</Visible>
+          </Parameter>
+          <Parameter>
+            <Name>LayerSchemePicX</Name>
+            <Text> </Text>
+            <Value>layers_outer_x.png</Value>
+            <ValueType>Picture</ValueType>
+            <Visible>LayerScheme == 2</Visible>
           </Parameter>
           <Parameter>
             <Name>EdgeZonesActive</Name>
