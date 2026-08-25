@@ -361,6 +361,18 @@ Der Parameter heisst bewusst `LayerOrder` und nicht mehr `LayerScheme`:
 wegen `<ReadLastInput>True</ReadLastInput>` würde sonst der gespeicherte
 Altwert aus der `PictureButtonList`-Zeit weiter greifen.
 
+### Allplan-Layer der Hauptbewehrung
+
+Die vier Folien hängen an der **Lagennummer**, nicht an der Richtung
+(`LayerLevel1` … `LayerLevel4`): die 1. Lage ist immer die unterste,
+unabhängig davon, ob sie in X oder in Y läuft. Beim Wechsel der
+Lagerichtung wandert der Layer damit mit der Lage mit.
+
+Vorher hiessen die Parameter `LayerBottomX`/`LayerBottomY`/`LayerTopX`/
+`LayerTopY` und waren an die Richtung gebunden — dadurch blieb die Folie
+der „1. Lage" beim Variantenwechsel auf den waagrechten Eisen stehen,
+obwohl die Höhenlagen im Modell korrekt tauschten.
+
 ### Betondeckung und Höhenlagen
 
 Die Betondeckung ist wahlweise **ein Wert für alles** („Alle gleich") oder

@@ -802,27 +802,27 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>LayerBottomX</Name>
-            <Text>Layer untere Lage X</Text>
+            <Name>LayerLevel1</Name>
+            <Text>Layer 1. Lage (unten, aussen)</Text>
             <Value>7580</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
-            <Name>LayerBottomY</Name>
-            <Text>Layer untere Lage Y</Text>
+            <Name>LayerLevel2</Name>
+            <Text>Layer 2. Lage (unten, innen)</Text>
             <Value>7586</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
-            <Name>LayerTopX</Name>
-            <Text>Layer obere Lage X</Text>
-            <Value>7583</Value>
+            <Name>LayerLevel3</Name>
+            <Text>Layer 3. Lage (oben, innen)</Text>
+            <Value>7582</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>
-            <Name>LayerTopY</Name>
-            <Text>Layer obere Lage Y</Text>
-            <Value>7582</Value>
+            <Name>LayerLevel4</Name>
+            <Text>Layer 4. Lage (oben, aussen)</Text>
+            <Value>7583</Value>
             <ValueType>Layer</ValueType>
           </Parameter>
           <Parameter>

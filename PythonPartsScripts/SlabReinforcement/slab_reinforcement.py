@@ -1319,11 +1319,6 @@ class SlabReinforcement():
                 layer.diameter = float(build_ele.DiaAll.value)
                 layer.spacing = build_ele.SpacingAll.value
 
-        bottom_x.allplan_layer = build_ele.LayerBottomX.value
-        bottom_y.allplan_layer = build_ele.LayerBottomY.value
-        top_x.allplan_layer = build_ele.LayerTopX.value
-        top_y.allplan_layer = build_ele.LayerTopY.value
-
         # Höhenlage der Stabachsen über Plattenunterkante — Formeln aus dem
         # Deckenplatte-PythonPart des Anwenders (z1..z4): die äußere Richtung
         # liegt direkt auf bzw. unter der Betondeckung, die innere darüber
@@ -1352,6 +1347,20 @@ class SlabReinforcement():
         else:
             bottom_outer, bottom_inner = bottom_y, bottom_x
             top_outer, top_inner = top_y, top_x
+
+        # Die Allplan-Layer haengen an der Lagennummer, nicht an der
+        # Richtung: die 1. Lage ist immer die unterste, unabhaengig davon,
+        # ob sie in X oder in Y laeuft. Damit wandert der Layer beim
+        # Wechsel der Lagerichtung mit der Lage mit.
+        bottom_outer.allplan_layer = build_ele.LayerLevel1.value
+        bottom_inner.allplan_layer = build_ele.LayerLevel2.value
+        top_inner.allplan_layer = build_ele.LayerLevel3.value
+        top_outer.allplan_layer = build_ele.LayerLevel4.value
+
+        print(f'SlabReinforcement: Layer 1.-4. Lage = '
+              f'{bottom_outer.allplan_layer}/{bottom_inner.allplan_layer}/'
+              f'{top_inner.allplan_layer}/{top_outer.allplan_layer} '
+              f'(1. Lage laeuft in {outer_direction})')
 
         # unten: Deckung bis Aussenkante der 1. Lage, die 2. Lage liegt
         # darüber; oben spiegelbildlich ab Aussenkante der 4. Lage
