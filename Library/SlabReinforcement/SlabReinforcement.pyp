@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.8.2</Version>
+    <Version>0.8.3</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -72,19 +72,19 @@
         <ValueType>Expander</ValueType>
         <Parameters>
           <Parameter>
-            <Name>LayerScheme</Name>
+            <Name>LayerOrder</Name>
             <Text>Lagenschema</Text>
             <Value>2</Value>
             <ValueType>RadioButtonGroup</ValueType>
             <Parameters>
               <Parameter>
-                <Name>LayerSchemeY</Name>
+                <Name>LayerOrderY</Name>
                 <Text>1./4. Lage senkrecht (äussere Lagen in Y)</Text>
                 <Value>1</Value>
                 <ValueType>RadioButton</ValueType>
               </Parameter>
               <Parameter>
-                <Name>LayerSchemeX</Name>
+                <Name>LayerOrderX</Name>
                 <Text>1./4. Lage waagrecht (äussere Lagen in X)</Text>
                 <Value>2</Value>
                 <ValueType>RadioButton</ValueType>
@@ -92,18 +92,20 @@
             </Parameters>
           </Parameter>
           <Parameter>
-            <Name>LayerSchemePicY</Name>
+            <Name>LayerOrderPicY</Name>
             <Text> </Text>
             <Value>layers_outer_y.png</Value>
+            <Orientation>Middle</Orientation>
             <ValueType>Picture</ValueType>
-            <Visible>LayerScheme == 1</Visible>
+            <Visible>LayerOrder == 1</Visible>
           </Parameter>
           <Parameter>
-            <Name>LayerSchemePicX</Name>
+            <Name>LayerOrderPicX</Name>
             <Text> </Text>
             <Value>layers_outer_x.png</Value>
+            <Orientation>Middle</Orientation>
             <ValueType>Picture</ValueType>
-            <Visible>LayerScheme == 2</Visible>
+            <Visible>LayerOrder == 2</Visible>
           </Parameter>
           <Parameter>
             <Name>EdgeZonesActive</Name>

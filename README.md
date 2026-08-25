@@ -333,17 +333,29 @@ das ist die übliche Live-Vorschau von Standard-PythonParts.
 
 ### Lagenschema
 
-Statt einer Textauswahl „äussere Lagen X/Y" wird das Schema als **Bild**
-gewählt (`LayerScheme`, `PictureButtonList` mit den beiden PNG neben der
-`.pyp`). Durchgezogen = untere Lagen, gestrichelt = obere:
+Statt einer Textauswahl „äussere Lagen X/Y" wird das Schema über eine
+**RadioButtonGroup** `LayerOrder` gewählt (Werte 1 und 2); darunter zeigt
+ein `Picture`-Parameter das jeweils gewählte Schema gross an
+(`LayerOrderPicY` / `LayerOrderPicX`, umgeschaltet über `<Visible>`).
+Durchgezogen = untere Lagen, gestrichelt = obere:
 
 | Bild | Bedeutung |
 | --- | --- |
 | `layers_outer_y.png` | 1. Lage senkrecht, 2. waagrecht, 3. waagrecht, 4. senkrecht → **äussere Lagen in Y** |
 | `layers_outer_x.png` | 1. Lage waagrecht, 2. senkrecht, 3. senkrecht, 4. waagrecht → **äussere Lagen in X** |
 
-Die Bildpfade in `<ValueList2>` sind relativ zur `.pyp`
-([PictureButtonList / PictureComboBox](https://github.com/NemetschekAllplan/PythonPartsExamples/blob/main/Library/Examples/PythonParts/PaletteExamples/BasicControls/PictureComboBox.pyp)).
+Die Bildpfade sind relativ zur `.pyp`
+([Picture](https://pythonparts.allplan.com/2026/manual/key_components/palette/parameter_with_layout_control/)).
+Die Gruppenstruktur entspricht dem offiziellen Beispiel
+[RadioButtons.pyp](https://github.com/NemetschekAllplan/PythonPartsExamples/blob/main/Library/Examples/PythonParts/PaletteExamples/BasicControls/RadioButtons.pyp):
+die `RadioButton`-Kinder stehen in einem `<Parameters>`-Block innerhalb des
+`RadioButtonGroup`-Parameters, der zugleich der Werthalter ist.
+
+`PictureButtonList` war hier der falsche Steuerelementtyp — das ist eine
+Ereignis-Knopfleiste ohne Zustand, die Auswahl erreichte den Parameter nie.
+Der Parameter heisst bewusst `LayerOrder` und nicht mehr `LayerScheme`:
+wegen `<ReadLastInput>True</ReadLastInput>` würde sonst der gespeicherte
+Altwert aus der `PictureButtonList`-Zeit weiter greifen.
 
 ### Betondeckung und Höhenlagen
 

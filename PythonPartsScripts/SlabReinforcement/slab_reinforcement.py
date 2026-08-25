@@ -166,7 +166,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.8.2'
+SCRIPT_VERSION = '0.8.3'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -195,9 +195,30 @@ EVENT_CLEAR_WALLS = 1006
 OPENING_STAGE = 1
 WALL_STAGE = 2
 
-# Lagenschema (Palette: LayerScheme, Bildauswahl)
+# Lagenschema (Palette: LayerOrder, RadioButtonGroup + Vorschaubild)
 LAYER_SCHEME_OUTER_Y = 1     # 1./4. Lage senkrecht -> äussere Lagen in Y
 LAYER_SCHEME_OUTER_X = 2     # 1./4. Lage waagrecht -> äussere Lagen in X
+
+
+def layer_scheme_value(raw) -> int:
+    """Palettenwert des Lagenschemas robust auf 1 oder 2 abbilden.
+
+    Der RadioButtonGroup-Wert kann je nach Allplan-Version als int, float
+    oder str ankommen; ein unbekannter Wert (z. B. aus einem alten
+    gespeicherten Parametersatz) faellt auf das Standardschema zurueck,
+    statt eine Exception zu werfen.
+    """
+
+    try:
+        value = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return LAYER_SCHEME_OUTER_X
+
+    if value not in (LAYER_SCHEME_OUTER_Y, LAYER_SCHEME_OUTER_X):
+        return LAYER_SCHEME_OUTER_X
+
+    return value
+
 
 
 def check_allplan_version(_build_ele: BuildingElement,
@@ -1240,14 +1261,18 @@ class SlabReinforcement():
         # (äussere Lagen in Y), Schema 2 = 1./4. Lage waagrecht (in X).
         # Die Bilder zeigen genau diese Nummerierung, durchgezogen = untere,
         # gestrichelt = obere Lagen.
-        outer_direction = 'X' if int(build_ele.LayerScheme.value) == LAYER_SCHEME_OUTER_X \
+        raw_scheme = build_ele.LayerOrder.value
+        outer_direction = 'X' if layer_scheme_value(raw_scheme) == LAYER_SCHEME_OUTER_X \
             else 'Y'
 
         # Im Trace-Fenster nachvollziehbar, welche Richtung tatsaechlich
         # aussen liegt — der Hoehenunterschied betraegt nur einen
-        # Stabdurchmesser und ist in der Draufsicht nicht zu sehen
-        print(f'SlabReinforcement: Lagenschema {build_ele.LayerScheme.value} — '
-              f'1./4. Lage in {outer_direction}-Richtung (äussere Lagen)')
+        # Stabdurchmesser und ist in der Draufsicht nicht zu sehen. Der
+        # Rohwert steht mit dabei, damit sich ein nicht ankommender
+        # Palettenwert von einer falschen Auswertung unterscheiden laesst.
+        print(f'SlabReinforcement: Lagenschema {raw_scheme!r} '
+              f'({type(raw_scheme).__name__}) — 1./4. Lage in '
+              f'{outer_direction}-Richtung (äussere Lagen)')
 
         if outer_direction == 'X':
             bottom_outer, bottom_inner = bottom_x, bottom_y
