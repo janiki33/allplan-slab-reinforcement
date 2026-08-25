@@ -216,3 +216,60 @@ def auto_leg_length(lap_length: float,
     leg = max(lap_length - available, min_leg)
 
     return math.floor(leg / 10.0) * 10.0
+
+
+def _footprint_signature(loop: Loop) -> tuple[float, float, float]:
+    """Kennwerte eines Grundrisses für den Gleichheitsvergleich:
+    Fläche und Schwerpunkt (unabhängig von Punktreihenfolge und Startpunkt).
+    """
+
+    area = signed_area(loop)
+
+    if abs(area) < 1e-9:
+        xs = [p[0] for p in loop]
+        ys = [p[1] for p in loop]
+        return (0.0, sum(xs) / len(xs), sum(ys) / len(ys))
+
+    cx = cy = 0.0
+
+    for i, (x1, y1) in enumerate(loop):
+        x2, y2 = loop[(i + 1) % len(loop)]
+        cross = x1 * y2 - x2 * y1
+        cx += (x1 + x2) * cross
+        cy += (y1 + y2) * cross
+
+    return (abs(area), cx / (6.0 * area), cy / (6.0 * area))
+
+
+def same_footprint(a: Loop, b: Loop, tol: float = 1.0) -> bool:
+    """Beschreiben zwei Grundrisse dieselbe Wand? Verglichen werden Fläche
+    und Schwerpunkt mit Toleranz — robust gegen Punktreihenfolge und
+    Rundung, ausreichend trennscharf für reale Wandstellungen.
+    """
+
+    area_a, cx_a, cy_a = _footprint_signature(a)
+    area_b, cx_b, cy_b = _footprint_signature(b)
+
+    if math.hypot(cx_a - cx_b, cy_a - cy_b) > tol:
+        return False
+
+    return abs(area_a - area_b) <= tol * max(1.0, math.sqrt(max(area_a, area_b)))
+
+
+def toggle_walls(existing: list[Loop], picked: list[Loop]) -> list[Loop]:
+    """Mehrfachauswahl-Verhalten: bereits erfasste Wände werden durch
+    erneutes Wählen entfernt (abgewählt), neue kommen hinzu. Innerhalb
+    einer Auswahlrunde doppelt getroffene Wände zählen einfach.
+    """
+
+    result = list(existing)
+
+    for loop in picked:
+        for index, kept in enumerate(result):
+            if same_footprint(kept, loop):
+                del result[index]
+                break
+        else:
+            result.append(loop)
+
+    return result

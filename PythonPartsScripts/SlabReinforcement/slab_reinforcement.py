@@ -46,6 +46,8 @@ from PythonPartUtil import PythonPartUtil
 from ScriptObjectInteractors.OnCancelFunctionResult import OnCancelFunctionResult
 from ScriptObjectInteractors.PointInteractor import PointInteractor, PointInteractorResult
 from ScriptObjectInteractors.PolygonInteractor import PolygonInteractor, PolygonInteractorResult
+from ScriptObjectInteractors.MultiElementSelectInteractor import (MultiElementSelectInteractor,
+                                                                  MultiElementSelectInteractorResult)
 from ScriptObjectInteractors.SingleElementSelectInteractor import (SingleElementSelectInteractor,
                                                                    SingleElementSelectResult)
 from StdReinfShapeBuilder.ConcreteCoverProperties import ConcreteCoverProperties
@@ -142,6 +144,7 @@ split_closed_loops = _contour_placement.split_closed_loops
 connection_bar_endpoints = _contour_placement.connection_bar_endpoints
 wall_connection_runs = _wall_connection.wall_connection_runs
 wall_auto_leg_length = _wall_connection.auto_leg_length
+toggle_walls = _wall_connection.toggle_walls
 LONGEST = _contour_placement.LONGEST
 SHORTEST = _contour_placement.SHORTEST
 
@@ -166,7 +169,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.8.4'
+SCRIPT_VERSION = '0.8.5'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -270,7 +273,7 @@ class SlabReinforcementScript(BaseScriptObject):
         self.polygon_result = PolygonInteractorResult()
         self.opening_result = PolygonInteractorResult()
         self.sel_result = SingleElementSelectResult()
-        self.wall_sel_result = SingleElementSelectResult()
+        self.wall_sel_result = MultiElementSelectInteractorResult()
 
         # 0 = Kontur/Absetzpunkt, OPENING_STAGE = Aussparungen zeichnen
         self.input_stage = 0
@@ -380,9 +383,10 @@ class SlabReinforcementScript(BaseScriptObject):
             return
 
         if self.input_stage == WALL_STAGE:
-            # Gewählte Wand übernehmen und sofort die nächste anbieten —
-            # ESC beendet die Runde (siehe on_cancel_function)
-            self._process_selected_wall()
+            # Auswahl übernehmen (Toggle: erneut gewählte Wände werden
+            # abgewählt) und die Runde erneut anbieten — ESC beendet sie
+            # (siehe on_cancel_function)
+            self._process_selected_walls()
             self._start_wall_input(restart=True)
             return
 
@@ -595,7 +599,7 @@ class SlabReinforcementScript(BaseScriptObject):
             return
 
         self.input_stage = WALL_STAGE
-        self.wall_sel_result = SingleElementSelectResult()
+        self.wall_sel_result = MultiElementSelectInteractorResult()
 
         # InputMode zurück auf INPUT, damit start_next_input das Ergebnis
         # abholt; input_finished bleibt True, damit die bereits erzeugte
@@ -621,32 +625,35 @@ class SlabReinforcementScript(BaseScriptObject):
 
         # Eine leere Liste hiesse "kein Typ erlaubt" — dann lieber ganz ohne
         # Filter (None laut Doku = keine Einschränkung) und die Grundriss-
-        # Lesbarkeit entscheiden lassen
-        self.script_object_interactor = SingleElementSelectInteractor(
+        # Lesbarkeit entscheiden lassen. Mehrfachauswahl wie im offiziellen
+        # Beispiel ModifyPlaneReferences.py: Klick oder Fenster, das
+        # Ergebnis kommt gesammelt in start_next_input an.
+        self.script_object_interactor = MultiElementSelectInteractor(
             self.wall_sel_result, wall_uuids if wall_uuids else None,
-            'Wand wählen — ESC beendet die Auswahl')
+            'Wände wählen (Klick oder Fenster) — erneut gewählte werden '
+            'abgewählt, ESC beendet')
 
         self.script_object_interactor.start_input(self.coord_input)
 
         if not restart:
-            print('SlabReinforcement: Wände nacheinander wählen — '
-                  'ESC beendet die Auswahl')
+            print('SlabReinforcement: Wände wählen (auch mehrere per '
+                  'Fenster) — erneutes Wählen wählt ab, ESC beendet')
 
 
-    def _process_selected_wall(self):
-        """Grundriss der gewählten Wand an die Wandliste anhängen."""
+    def _wall_footprint_from_element(self, sel_element):
+        """Aussenkontur einer gewählten Wand — oder None.
 
-        sel_element = self.wall_sel_result.sel_element
+        Wurde das Wand-Verbundelement statt einer Schicht getroffen, trägt
+        es selbst oft keine Punktgeometrie — dann werden die Grundrisse
+        seiner Kindelemente (Schichten) gelesen.
+        """
 
         if sel_element is None or (hasattr(sel_element, 'IsNull')
                                    and sel_element.IsNull()):
-            return
+            return None
 
         loops = self._loops_from_element(sel_element)
 
-        # Wurde das Wand-Verbundelement statt einer Schicht getroffen, trägt
-        # es selbst oft keine Punktgeometrie — dann die Grundrisse seiner
-        # Kindelemente (Schichten) einsammeln
         if not loops:
             service = getattr(AllplanEleAdapter,
                               'BaseElementAdapterChildElementsService', None)
@@ -660,24 +667,54 @@ class SlabReinforcementScript(BaseScriptObject):
                           f'({error})')
 
         if not loops:
-            print('SlabReinforcement: aus dem gewählten Element lässt sich '
-                  'kein Wandgrundriss lesen — übersprungen')
+            return None
+
+        return max(loops, key=lambda loop: abs(loop_area(loop)))
+
+
+    def _process_selected_walls(self):
+        """Mehrfachauswahl übernehmen: neue Wände hinzu, bereits
+        erfasste durch erneutes Wählen wieder heraus (Toggle).
+        """
+
+        picked = []
+        unreadable = 0
+
+        for sel_element in self.wall_sel_result.sel_elements:
+            footprint = self._wall_footprint_from_element(sel_element)
+
+            if footprint is None:
+                unreadable += 1
+                continue
+
+            # Im Rechteckmodus liegt die Platte im lokalen System des
+            # Absetzpunkts — die Wand kommt global herein
+            if self.build_ele.InputMethod.value == INPUT_RECT:
+                origin = self.placement_pnt
+                footprint = [(x - origin.X, y - origin.Y) for x, y in footprint]
+
+            picked.append(footprint)
+
+        if unreadable:
+            print(f'SlabReinforcement: {unreadable} Element(e) ohne lesbaren '
+                  f'Wandgrundriss übersprungen')
+
+        if not picked:
             return
 
-        # Grösster Loop = Aussenkontur der Wand
-        footprint = max(loops, key=lambda loop: abs(loop_area(loop)))
+        before = len(self.walls)
+        self.walls = toggle_walls(self.walls, picked)
 
-        # Im Rechteckmodus liegt die Platte im lokalen System des
-        # Absetzpunkts — die Wand kommt global herein
-        if self.build_ele.InputMethod.value == INPUT_RECT:
-            origin = self.placement_pnt
-            footprint = [(x - origin.X, y - origin.Y) for x, y in footprint]
+        # len ändert sich um (hinzu - abgewählt); zusammen mit der Anzahl
+        # der gewählten ist beides rekonstruierbar
+        removed = (before + len(picked) - len(self.walls)) // 2
+        added = len(picked) - removed
 
-        self.walls.append(footprint)
         self._save_state()
 
-        print(f'SlabReinforcement: Wand übernommen '
-              f'({len(self.walls)} insgesamt) — nächste wählen oder ESC')
+        print(f'SlabReinforcement: {added} Wand/Wände hinzu, {removed} '
+              f'abgewählt — {len(self.walls)} insgesamt. Weiter wählen '
+              f'oder ESC')
 
 
     def execute(self) -> CreateElementResult:
@@ -736,11 +773,15 @@ class SlabReinforcementScript(BaseScriptObject):
 
         BuildingElementListService.write_to_default_favorite_file([self.build_ele])
 
-        # Wand-Auswahlrunde: ESC schliesst die Runde ab (die gewählten
-        # Wände bleiben), statt die Eingabe des Interactors zu verwerfen
+        # Wand-Auswahlrunde: ESC schliesst nur die Runde ab (die gewählten
+        # Wände bleiben) — CONTINUE_INPUT hält das PythonPart am Leben,
+        # CREATE_ELEMENTS würde es absetzen und beenden
         if self.input_stage == WALL_STAGE:
+            if self.script_object_interactor is not None:
+                self.script_object_interactor.on_cancel_function()
+
             self._finish_input()
-            return OnCancelFunctionResult.CREATE_ELEMENTS
+            return OnCancelFunctionResult.CONTINUE_INPUT
 
         if self.script_object_interactor is not None:
             return self.script_object_interactor.on_cancel_function()
@@ -760,6 +801,17 @@ class SlabReinforcementScript(BaseScriptObject):
 
             if self.script_object_interactor is not None:
                 self.script_object_interactor.start_input(self.coord_input)
+
+        # Die Erkennung liest Kindelemente der GEWÄHLTEN Decke — im
+        # Rechteck- und Polygonmodus gibt es kein gewähltes Element,
+        # dort kann sie nichts finden
+        if name == 'DetectOpenings' and _value and \
+                self.build_ele.InputMethod.value != INPUT_ELEMENT:
+            print('SlabReinforcement: "Vorhandene automatisch erkennen" '
+                  'wirkt nur im Eingabemodus "Element wählen" — im '
+                  'Rechteck-/Polygonmodus gibt es keine gewählte Decke, '
+                  'deren Aussparungen gelesen werden könnten. Dort über '
+                  '"Aussparung zeichnen" erfassen.')
 
         return False
 
@@ -885,13 +937,33 @@ class SlabReinforcementScript(BaseScriptObject):
             return []
 
         loops: list[list[tuple[float, float]]] = []
+        no_geometry = 0
 
         for child in children:
-            loops += self._loops_from_element(child)
+            child_loops = self._loops_from_element(child)
+
+            if not child_loops:
+                no_geometry += 1
+
+            loops += child_loops
 
         inside = [loop for loop in loops if self._loop_is_inside_contour(loop)]
 
-        print(f'SlabReinforcement: {len(inside)} Aussparungselement(e) erkannt')
+        # Ausführlich protokollieren: die Erkennung hängt an mehreren
+        # Stufen (Kindelemente vorhanden? Punktgeometrie lesbar? innerhalb
+        # der Kontur?) — ohne diese Zahlen ist im Trace-Fenster nicht
+        # unterscheidbar, welche Stufe leer ausging
+        print(f'SlabReinforcement: Aussparungs-Erkennung — '
+              f'{len(children)} Kindelement(e), davon {no_geometry} ohne '
+              f'lesbare Punktgeometrie; {len(loops)} Kontur(en) gelesen, '
+              f'{len(inside)} innerhalb der Platte')
+
+        if len(children) == 0:
+            print('SlabReinforcement: die Decke meldet keine Kindelemente — '
+                  'Aussparungen, die nicht als Kindelement der Decke '
+                  'modelliert sind (z. B. eigenständige Durchbruchskörper), '
+                  'findet die Erkennung nicht. Dann über "Aussparung '
+                  'zeichnen" erfassen.')
 
         return self._filter_openings(inside)
 

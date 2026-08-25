@@ -21,6 +21,7 @@ keine Kopie kommerzieller Plugins.
 | v0.7 | Neue Stoss-Systematik nach Bürostandard (14-Formen-Studienblatt): minimale Verlegungsanzahl, Fluchten, Passeisen-Grenze, eine Stosslinie je Abtreppung | umgesetzt |
 | Korrektur | Separates Anschlusseisen im Konturmodus: Vorzeichenfehler behoben, durch den der Stab an einer von zwei gegenüberliegenden Kantenseiten um 2 × Stoßlänge außerhalb der Platte statt mittig auf ihr lag | umgesetzt |
 | v0.8 | Wandanschluss: 3D-Wände antippen, L-förmige Anschlusseisen entlang der langen Wandseiten (Vorbild Büro-PythonPart "AnschlusseisenBew") | umgesetzt |
+| v0.8.5 | Wandauswahl als Mehrfachauswahl mit Toggle (erneut wählen = abwählen); ESC beendet nur die Auswahlrunde statt des PythonParts; Aussparungs-Erkennung protokolliert jede Stufe im Trace-Fenster | umgesetzt |
 | v0.9 | Auflagererkennung (Wände/Unterzüge) mit automatischer Anschlussbewehrung | Roadmap |
 
 **Hinweis:** Der Code wurde gegen die offizielle 2026-API-Doku und die
@@ -167,9 +168,11 @@ Laufwerk `J:` nur dort existiert. Meldet das Protokoll trotzdem
 
 ## Wandanschluss (Anschlusseisen an 3D-Wänden)
 
-Auf der Palettenseite **Wandanschluss** werden — wie bei den Aussparungen —
-Wände über einen Button **nacheinander angetippt** (ESC beendet die Runde,
-jederzeit wiederholbar, einzeln oder komplett wieder entfernbar). Aus jeder
+Auf der Palettenseite **Wandanschluss** werden Wände per
+**Mehrfachauswahl** erfasst (Klick oder Auswahlfenster, ESC beendet nur die
+Runde). **Erneutes Wählen einer bereits erfassten Wand wählt sie ab** —
+hinzufügen und abwählen gehen mit derselben Auswahl; zusätzlich gibt es
+„Letzte/Alle entfernen". Aus jeder
 Wand wird der Grundriss gelesen; entlang der **langen Wandseiten** entsteht
 je eine Verlegung L-förmiger Anschlusseisen:
 

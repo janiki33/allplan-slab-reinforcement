@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.8.4</Version>
+    <Version>0.8.5</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -649,7 +649,7 @@
         <Parameters>
           <Parameter>
             <Name>AddWallButton</Name>
-            <Text>Wand wählen (hinzufügen)</Text>
+            <Text>Wände wählen (hinzufügen/abwählen)</Text>
             <EventId>1004</EventId>
             <ValueType>Button</ValueType>
           </Parameter>

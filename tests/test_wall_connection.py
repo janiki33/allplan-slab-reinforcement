@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent
                        / 'PythonPartsScripts' / 'SlabReinforcement'))
 
 from wall_connection import (WallRun, auto_leg_length, clip_segment_to_loop,
+                             same_footprint, toggle_walls,
                              wall_connection_runs, wall_thickness)
 
 SLAB = [(0.0, 0.0), (5000.0, 0.0), (5000.0, 4000.0), (0.0, 4000.0)]
@@ -108,6 +109,40 @@ class TestWallConnectionRuns(unittest.TestCase):
         normals_cw = sorted(round(r.outward_deg % 360.0, 3) for r in runs_cw)
 
         self.assertEqual(normals_ccw, normals_cw)
+
+
+class TestToggleWalls(unittest.TestCase):
+    """Mehrfachauswahl: erneut gewählte Wände werden abgewählt."""
+
+    WALL_A = [(1000.0, 2000.0), (4000.0, 2000.0), (4000.0, 2240.0), (1000.0, 2240.0)]
+    WALL_B = [(500.0, 500.0), (740.0, 500.0), (740.0, 3500.0), (500.0, 3500.0)]
+
+    def test_neue_wand_kommt_hinzu(self):
+        self.assertEqual(toggle_walls([], [self.WALL_A]), [self.WALL_A])
+
+    def test_erneutes_waehlen_entfernt(self):
+        self.assertEqual(toggle_walls([self.WALL_A], [self.WALL_A]), [])
+
+    def test_gemischt_hinzu_und_abwaehlen(self):
+        result = toggle_walls([self.WALL_A], [self.WALL_A, self.WALL_B])
+
+        self.assertEqual(result, [self.WALL_B])
+
+    def test_punktreihenfolge_egal(self):
+        rotated = self.WALL_A[2:] + self.WALL_A[:2]
+
+        self.assertEqual(toggle_walls([self.WALL_A], [list(reversed(rotated))]), [])
+
+    def test_leicht_verschobene_wand_ist_eine_andere(self):
+        shifted = [(x + 50.0, y) for x, y in self.WALL_A]
+
+        self.assertEqual(len(toggle_walls([self.WALL_A], [shifted])), 2)
+
+    def test_same_footprint_toleranz(self):
+        jittered = [(x + 0.05, y - 0.05) for x, y in self.WALL_A]
+
+        self.assertTrue(same_footprint(self.WALL_A, jittered))
+        self.assertFalse(same_footprint(self.WALL_A, self.WALL_B))
 
 
 class TestAutoLegLength(unittest.TestCase):
