@@ -331,18 +331,19 @@ verifiziert.
 Bei jeder Parameteränderung ruft Allplan `create_element` neu auf —
 das ist die übliche Live-Vorschau von Standard-PythonParts.
 
-### Lagenschema
+### Lagerichtung
 
-Statt einer Textauswahl „äussere Lagen X/Y" wird das Schema über eine
-**RadioButtonGroup** `LayerOrder` gewählt (Werte 1 und 2); darunter zeigt
-ein `Picture`-Parameter das jeweils gewählte Schema gross an
+Statt einer Textauswahl „äussere Lagen X/Y" wird die Lagerichtung über
+eine **RadioButtonGroup** `LayerOrder` gewählt — „Variante 1" (Wert 1) und
+„Variante 2" (Wert 2); darunter zeigt ein `Picture`-Parameter die jeweils
+gewählte Variante gross an
 (`LayerOrderPicY` / `LayerOrderPicX`, umgeschaltet über `<Visible>`).
 Durchgezogen = untere Lagen, gestrichelt = obere:
 
 | Bild | Bedeutung |
 | --- | --- |
-| `layers_outer_y.png` | 1. Lage senkrecht, 2. waagrecht, 3. waagrecht, 4. senkrecht → **äussere Lagen in Y** |
-| `layers_outer_x.png` | 1. Lage waagrecht, 2. senkrecht, 3. senkrecht, 4. waagrecht → **äussere Lagen in X** |
+| `layers_outer_y.png` (Variante 1) | 1. Lage senkrecht, 2. waagrecht, 3. waagrecht, 4. senkrecht → **äussere Lagen in Y** |
+| `layers_outer_x.png` (Variante 2) | 1. Lage waagrecht, 2. senkrecht, 3. senkrecht, 4. waagrecht → **äussere Lagen in X** |
 
 Die Bildpfade sind relativ zur `.pyp`
 ([Picture](https://pythonparts.allplan.com/2026/manual/key_components/palette/parameter_with_layout_control/)).

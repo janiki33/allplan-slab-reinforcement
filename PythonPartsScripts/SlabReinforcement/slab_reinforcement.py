@@ -166,7 +166,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.8.3'
+SCRIPT_VERSION = '0.8.4'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -1270,7 +1270,7 @@ class SlabReinforcement():
         # Stabdurchmesser und ist in der Draufsicht nicht zu sehen. Der
         # Rohwert steht mit dabei, damit sich ein nicht ankommender
         # Palettenwert von einer falschen Auswertung unterscheiden laesst.
-        print(f'SlabReinforcement: Lagenschema {raw_scheme!r} '
+        print(f'SlabReinforcement: Lagerichtung {raw_scheme!r} '
               f'({type(raw_scheme).__name__}) — 1./4. Lage in '
               f'{outer_direction}-Richtung (äussere Lagen)')
 

@@ -3,7 +3,7 @@
   <Script>
     <Name>SlabReinforcement.py</Name>
     <Title>SlabReinforcement</Title>
-    <Version>0.8.3</Version>
+    <Version>0.8.4</Version>
     <ReadLastInput>True</ReadLastInput>
   </Script>
   <Constants>
@@ -73,19 +73,19 @@
         <Parameters>
           <Parameter>
             <Name>LayerOrder</Name>
-            <Text>Lagenschema</Text>
+            <Text>Lagerichtung</Text>
             <Value>2</Value>
             <ValueType>RadioButtonGroup</ValueType>
             <Parameters>
               <Parameter>
                 <Name>LayerOrderY</Name>
-                <Text>1./4. Lage senkrecht (äussere Lagen in Y)</Text>
+                <Text>Variante 1</Text>
                 <Value>1</Value>
                 <ValueType>RadioButton</ValueType>
               </Parameter>
               <Parameter>
                 <Name>LayerOrderX</Name>
-                <Text>1./4. Lage waagrecht (äussere Lagen in X)</Text>
+                <Text>Variante 2</Text>
                 <Value>2</Value>
                 <ValueType>RadioButton</ValueType>
               </Parameter>
