@@ -28,6 +28,7 @@ Alle Längenangaben in mm (Allplan-Standardeinheit).
 from __future__ import annotations
 
 import math
+import traceback
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -351,7 +352,28 @@ class SlabReinforcementScript(BaseScriptObject):
 
 
     def start_next_input(self):
-        """Eingabeergebnis übernehmen und in den Erzeugungsmodus wechseln."""
+        """Eingabeergebnis übernehmen und in den Erzeugungsmodus wechseln.
+
+        Komplett abgesichert: eine unbehandelte Ausnahme in diesem Pfad
+        beendet sonst das gesamte PythonPart beim ersten Klick — mit
+        Traceback im Trace-Fenster und Rückfall auf "Eingabe abschliessen"
+        bleibt es stattdessen bedienbar.
+        """
+
+        try:
+            self._start_next_input_unsafe()
+        except Exception:                              # noqa: BLE001
+            print('SlabReinforcement: Fehler beim Verarbeiten der Eingabe — '
+                  'Details folgen. Das PythonPart bleibt geöffnet.')
+            traceback.print_exc()
+
+            self.input_stage = 0
+            self.script_object_interactor = None
+            self.build_ele.InputMode.value = self.build_ele.INPUT_MODE_CREATION
+
+
+    def _start_next_input_unsafe(self):
+        """Eigentliche Eingabeverarbeitung (siehe start_next_input)."""
 
         build_ele = self.build_ele
 
@@ -467,6 +489,19 @@ class SlabReinforcementScript(BaseScriptObject):
 
 
     def on_control_event(self, event_id: int) -> bool:
+        """Palettenbuttons — abgesichert wie start_next_input, damit ein
+        Fehler im Handler nicht das PythonPart beendet."""
+
+        try:
+            return self._on_control_event_unsafe(event_id)
+        except Exception:                              # noqa: BLE001
+            print(f'SlabReinforcement: Fehler im Button-Handler {event_id} — '
+                  f'Details folgen. Das PythonPart bleibt geöffnet.')
+            traceback.print_exc()
+            return False
+
+
+    def _on_control_event_unsafe(self, event_id: int) -> bool:
         """Palettenbuttons der Aussparungsseite.
 
         Aussparungen sind keine Voreinstellung, sondern werden nach und
@@ -614,9 +649,15 @@ class SlabReinforcementScript(BaseScriptObject):
             'Wände wählen (Klick oder Fenster) — erneut gewählte werden '
             'abgewählt, ESC beendet')
 
-        self.script_object_interactor.start_input(self.coord_input)
-
         if not restart:
+            # Nur beim Button-Klick manuell starten: dort steckt das
+            # Framework in keinem Eingabeübergang (beim Aussparungs-Button
+            # bewährt). Beim Re-Arm aus start_next_input startet das
+            # Framework den zugewiesenen Interactor selbst — ein doppelter
+            # manueller Start würde die Eingabe abwürgen (offizielles
+            # Muster: ModifyPlaneReferences.start_next_input weist nur zu)
+            self.script_object_interactor.start_input(self.coord_input)
+
             print('SlabReinforcement: Wände wählen (auch mehrere per '
                   'Fenster) — erneutes Wählen wählt ab, ESC beendet')
 
