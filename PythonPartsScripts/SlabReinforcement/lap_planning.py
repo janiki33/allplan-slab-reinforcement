@@ -610,7 +610,12 @@ def _step_groups(region: _SlotRegion,
             merged.append(group)
 
     if len(merged) >= 2 and len(merged[-1]) == 1:
-        merged[-2] += merged.pop()
+        # Bewusst pop + extend statt `merged[-2] += merged.pop()`: die
+        # erweiterte Zuweisung schreibt NACH dem pop auf Index -2 der
+        # bereits geschrumpften Liste zurueck — bei zwei Gruppen ein
+        # IndexError, bei mehr landet das Ergebnis in der falschen Gruppe
+        last = merged.pop()
+        merged[-1].extend(last)
 
     result: list[PlacementGroup] = []
 

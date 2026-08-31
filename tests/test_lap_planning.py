@@ -8,8 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'PythonPartsScripts' / 'SlabReinforcement'))
 
 from contour_placement import compute_contour_bars
-from lap_planning import (PlacementGroup, active_fluchten, base_cuts,
-                          plan_layer)
+from lap_planning import (PlacementGroup, _SlotRegion, _step_groups,
+                          active_fluchten, base_cuts, plan_layer)
 
 PARAMS = dict(lmax=8000.0, lap=600.0, pass_threshold=3000.0,
               step_deviation=250.0, raster=50.0, min_piece=2000.0,
@@ -423,6 +423,46 @@ class NoSingletonTest(unittest.TestCase):
         for g in groups:
             if len(g.positions) == 1:
                 self.assertAlmostEqual(g.positions[0], last, delta=1.0)
+
+
+
+
+class TestStepGroupsEinzelgaenger(unittest.TestCase):
+    """Regression: `merged[-2] += merged.pop()` schrieb nach dem pop auf
+    Index -2 der bereits geschrumpften Liste zurück — bei genau zwei
+    Gruppen ein IndexError (PythonPart schloss sich beim Element-Klick),
+    bei dreien landete das Ergebnis in der falschen Gruppe (eine Stufe
+    verloren, eine doppelt)."""
+
+    def _run(self, entries):
+        region = _SlotRegion([pos for pos, _ in entries],
+                             [seg for _, seg in entries])
+
+        return _step_groups(region, line=5000.0, lap=600.0,
+                            step_deviation=50.0, raster=50.0, side='end')
+
+    def test_zwei_gruppen_letzte_einzeln_crasht_nicht(self):
+        # Gruppe 1: zwei Bahnen mit nahen Enden; Gruppe 2: ein Einzelgänger
+        groups = self._run([(0.0, (0.0, 3000.0)),
+                            (250.0, (0.0, 3010.0)),
+                            (500.0, (0.0, 4000.0))])
+
+        positions = sorted(pos for group in groups for pos in group.positions)
+
+        self.assertEqual(positions, [0.0, 250.0, 500.0])
+
+    def test_drei_gruppen_keine_verliert_keine_position(self):
+        groups = self._run([(0.0, (0.0, 3000.0)),
+                            (250.0, (0.0, 3010.0)),
+                            (500.0, (0.0, 3600.0)),
+                            (750.0, (0.0, 3610.0)),
+                            (1000.0, (0.0, 4200.0))])
+
+        positions = sorted(pos for group in groups for pos in group.positions)
+
+        # Jede Bahn genau einmal — der alte Code verlor hier eine Gruppe
+        # und führte eine andere doppelt
+        self.assertEqual(positions, [0.0, 250.0, 500.0, 750.0, 1000.0])
 
 
 if __name__ == '__main__':

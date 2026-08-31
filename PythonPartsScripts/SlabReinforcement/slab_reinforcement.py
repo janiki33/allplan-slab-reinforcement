@@ -170,7 +170,7 @@ if TYPE_CHECKING:
 else:
     from BuildingElement import BuildingElement
 
-SCRIPT_VERSION = '0.8.6'
+SCRIPT_VERSION = '0.8.7'
 
 # Erscheint im Allplan-Trace-Fenster beim Laden — damit im Zweifel erkennbar
 # ist, welche Skriptversion Allplan tatsächlich geladen hat
@@ -750,6 +750,24 @@ class SlabReinforcementScript(BaseScriptObject):
 
         if not self.input_finished:
             return CreateElementResult()
+
+        # Abgesichert wie start_next_input: eine Ausnahme beim Aufbau der
+        # Bewehrung wandert sonst ins Framework und beendet das PythonPart
+        # — genau so hat der Abtreppungsfehler in lap_planning die Funktion
+        # beim Element-Klick geschlossen. Mit leerem Ergebnis bleibt die
+        # Palette bedienbar und der Traceback steht im Trace-Fenster.
+        try:
+            return self._execute_unsafe()
+        except Exception:                              # noqa: BLE001
+            print('SlabReinforcement: Fehler beim Aufbau der Bewehrung — '
+                  'Details folgen. Das PythonPart bleibt geöffnet; bitte '
+                  'den Traceback melden.')
+            traceback.print_exc()
+            return CreateElementResult()
+
+
+    def _execute_unsafe(self) -> CreateElementResult:
+        """Eigentliche Element-Erzeugung (siehe execute)."""
 
         engine = SlabReinforcement(self.build_ele, self.document,
                                    contour=self.contour,
